@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Checker
+
+- Fix the 0.13.0 regression for `~` proofs in products, theorem arguments, constructor arguments, and spec aliases. Keep `~` in all type positions and compare both stream indices by conversion. The indexed `ν` still supplies the unfold step; its tail obligation stays `tail σ ~ tail τ`. Head-only proofs remain invalid. This does not add `uncons` on indexed proofs (#23).
+- Check the full indexed family when forming `~`, including in binder domains. A relation on `Stream F32` must not bypass the ban on kernel identity for `F32`.
+
 ## 0.13.0
 
 `Always P s` unfolds to `P (head s) × Always P (tail s)`, and `σ ~ τ` unfolds to `{head σ ≡ head τ} × (tail σ ~ tail τ)`. The binder is the predicate at a stream, and the recursive component of `unfold` is checked at that predicate on the tails. `tt` no longer proves `Always` of `IsZero` at `natsFrom 0`, nor `natsFrom 0 ~ zeros`. Stream is unchanged: a bare `ν` still substitutes the seed for the binder.
