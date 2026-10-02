@@ -822,6 +822,22 @@ defmodule Muro.Check do
       Enum.any?(bs, fn {_, _, b} -> has_self?(self, b) end)
   end
 
+  defp has_self?(self, {:mnat, e, p, z, s}),
+    do: has_self?(self, e) or has_self?(self, p) or has_self?(self, z) or has_self?(self, s)
+
+  defp has_self?(self, {:memp, e, p}), do: has_self?(self, e) or has_self?(self, p)
+
+  defp has_self?(self, {:munit, e, p, u}),
+    do: has_self?(self, e) or has_self?(self, p) or has_self?(self, u)
+
+  defp has_self?(self, {:idt, a, x, y}),
+    do: has_self?(self, a) or has_self?(self, x) or has_self?(self, y)
+
+  defp has_self?(self, {:rwt, e, p, t}),
+    do: has_self?(self, e) or has_self?(self, p) or has_self?(self, t)
+
+  defp has_self?(self, {:ann, e, a}), do: has_self?(self, e) or has_self?(self, a)
+
   defp has_self?(_, _), do: false
 
   defp occurs?(x, {:var, y}), do: x == y

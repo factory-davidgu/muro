@@ -6,6 +6,7 @@
 
 - Fix the 0.13.0 regression for `~` proofs in products, theorem arguments, constructor arguments, and spec aliases. Keep `~` in all type positions and compare both stream indices by conversion. The indexed `ν` still supplies the unfold step; its tail obligation stays `tail σ ~ tail τ`. Head-only proofs remain invalid. This does not add `uncons` on indexed proofs (#23).
 - Check the full indexed family when forming `~`, including in binder domains. A relation on `Stream F32` must not bypass the ban on kernel identity for `F32`.
+- Complete the Elixir head-occurrence check for rewrites, annotations, matches, and identity types, as in Agda. These forms must not hide a recursive call in an unfold head.
 
 ## 0.13.0
 
