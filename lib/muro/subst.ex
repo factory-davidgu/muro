@@ -97,6 +97,9 @@ defmodule Muro.Subst do
       {:bisim, s, t} ->
         {:bisim, ren(rho, s), ren(rho, t)}
 
+      {:always, a, p, s} ->
+        {:always, ren(rho, a), ren(rho, p), ren(rho, s)}
+
       {:unf, s, f} ->
         {:unf, ren(rho, s), ren(rho, f)}
 
@@ -236,6 +239,9 @@ defmodule Muro.Subst do
 
       {:bisim, s, t} ->
         {:bisim, sub(sigma, s), sub(sigma, t)}
+
+      {:always, a, p, s} ->
+        {:always, sub(sigma, a), sub(sigma, p), sub(sigma, s)}
 
       {:unf, s, f} ->
         {:unf, sub(sigma, s), sub(sigma, f)}

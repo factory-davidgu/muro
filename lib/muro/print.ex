@@ -157,6 +157,10 @@ defmodule Muro.Print do
     "uncons #{fmt(s, names, :app)}"
   end
 
+  defp fmt({:always, a, p, s}, names, _) do
+    "Always #{fmt(a, names, :app)} #{fmt(p, names, :app)} #{fmt(s, names, :app)}"
+  end
+
   defp fmt({:bisim, s, t}, names, _) do
     "#{fmt(s, names, :none)} ~ #{fmt(t, names, :none)}"
   end

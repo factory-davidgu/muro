@@ -71,6 +71,8 @@ data Foreign {n} : Tm n → Set where
   f-addt   : ∀ {t u} → Foreign (addt t u)
   f-toi64  : ∀ {t} → Foreign (toi64 t)
   f-packi  : ∀ {x y} → Foreign (packi x y)
+  f-alw    : ∀ {A P s} → Foreign (alw A P s)
+  f-bsm    : ∀ {A a b} → Foreign (bsm A a b)
 
 ------------------------------------------------------------------------
 -- Neutral and normal terms for this strategy (weak head: arguments,
@@ -196,6 +198,8 @@ foreign-no-step f-muli   ()
 foreign-no-step f-addt   ()
 foreign-no-step f-toi64  ()
 foreign-no-step f-packi  ()
+foreign-no-step f-alw    ()
+foreign-no-step f-bsm    ()
 
 -- A spine with a data head does not step: the head is not a λ.
 Spine-no-step : ∀ {σ m n} {h : Tm n} {as e u}

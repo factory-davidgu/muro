@@ -254,6 +254,8 @@ mutual
   synEqD (addt t u)     (addt t′ u′)   = synEq t t′ ∧ synEq u u′
   synEqD (toi64 t)      (toi64 t′)     = synEq t t′
   synEqD (packi x y)    (packi x′ y′)  = synEq x x′ ∧ synEq y y′
+  synEqD (alw A P s)    (alw A′ P′ s′) = synEq A A′ ∧ synEq P P′ ∧ synEq s s′
+  synEqD (bsm A a b)    (bsm A′ a′ b′) = synEq A A′ ∧ synEq a a′ ∧ synEq b b′
   synEqD _              _              = false
 
 ctorHead : ∀ {n} → Tm n → Bool
@@ -342,6 +344,8 @@ mutual
   convND k σ (addt t u)    (addt t′ u′)  = conv k σ t t′ >> conv k σ u u′
   convND k σ (toi64 t)     (toi64 t′)    = conv k σ t t′
   convND k σ (packi x y)   (packi x′ y′) = conv k σ x x′ >> conv k σ y y′
+  convND k σ (alw A P s)   (alw A′ P′ s′) = conv k σ A A′ >> conv k σ P P′ >> conv k σ s s′
+  convND k σ (bsm A a b)   (bsm A′ a′ b′) = conv k σ A A′ >> conv k σ a a′ >> conv k σ b b′
   convND _ _ u            v             =
     fail ("cannot convert " ++ showTm u ++ " ≁ " ++ showTm v)
 
@@ -517,6 +521,28 @@ data _,_⊢[_]_⇒_ σ Γ where
     → σ , Γ ⊢[ m ] s ⇐ nu F
     → σ , Γ ⊢[ m ] ucons s ⇒ inst F (nu F)
 
+  -- Always A P s: P is a predicate on A, s a stream of A.
+  ⇒-alw : ∀ {A P s}
+    → σ , Γ ⊢ A wf
+    → σ , Γ ⊢[ spec ] P ⇐ pi affine A typ
+    → σ , Γ ⊢[ spec ] s ⇐ stream A
+    → σ , Γ ⊢[ spec ] alw A P s ⇒ typ
+
+  -- σ ~ τ at A: two streams of A.
+  ⇒-bsm : ∀ {A a b}
+    → σ , Γ ⊢ A wf
+    → σ , Γ ⊢[ spec ] a ⇐ stream A
+    → σ , Γ ⊢[ spec ] b ⇐ stream A
+    → σ , Γ ⊢[ spec ] bsm A a b ⇒ typ
+
+  ⇒-ucons-alw : ∀ {m A P s p}
+    → σ , Γ ⊢[ m ] p ⇐ alw A P s
+    → σ , Γ ⊢[ m ] ucons p ⇒ alwStep A P s
+
+  ⇒-ucons-bsm : ∀ {m A a b p}
+    → σ , Γ ⊢[ m ] p ⇐ bsm A a b
+    → σ , Γ ⊢[ m ] ucons p ⇒ bsmStep A a b
+
   ⇒-i64 : σ , Γ ⊢[ spec ] i64 ⇒ typ
   ⇒-f32ty : σ , Γ ⊢[ spec ] f32ty ⇒ typ
 
@@ -588,6 +614,24 @@ data _,_⊢[_]_⇐_ σ Γ where
     → σ , Γ ⊢[ m ] f ⇐ pi affine S (wk (inst F S))
     → σ , Γ ⊢[ m ] unf seed f ⇐ nu F
 
+  -- Into Always and ~ the step takes the current stream(s) and an
+  -- invariant I over them: the seed is I at s (at a, b); the body proves
+  -- the head obligation and gives I at the tail(s).
+  ⇐-unf-alw : ∀ {m q q′ A P s I seed t}
+    → σ , ext Γ q (stream A) ⊢ I wf
+    → σ , Γ ⊢[ m ] seed ⇐ inst I s
+    → σ , ext (ext Γ q (stream A)) q′ I ⊢[ m ] t
+        ⇐ prod (app (wk (wk P)) (headTm (var (suc zero)))) (wk (atTail I))
+    → σ , Γ ⊢[ m ] unf seed (lam q (stream A) (lam q′ I t)) ⇐ alw A P s
+
+  ⇐-unf-bsm : ∀ {m qa qb qx A a b I seed t}
+    → σ , ext (ext Γ qa (stream A)) qb (wk (stream A)) ⊢ I wf
+    → σ , Γ ⊢[ m ] seed ⇐ inst₂ I a b
+    → σ , ext (ext (ext Γ qa (stream A)) qb (wk (stream A))) qx I ⊢[ m ] t
+        ⇐ prod (idt (wk (wk (wk A))) (headTm (var (suc (suc zero)))) (headTm (var (suc zero))))
+                (wk (atTails I))
+    → σ , Γ ⊢[ m ] unf seed (lam qa (stream A) (lam qb (wk (stream A)) (lam qx I t))) ⇐ bsm A a b
+
 -- Intentionally absent: spec ⇒ evid, evid ⇒ run, spec ⇒ run.
 
 ------------------------------------------------------------------------
@@ -648,6 +692,16 @@ viewNu k σ t with whnf k σ t
 ... | ok (nu F)   = ok F
 ... | ok t′       = fail ("expected ν, got " ++ showTm t′)
 
+-- The type of uncons on a coinductive value: ν F unrolls once; Always
+-- and ~ give the head obligation and the family at the tail(s).
+viewCo : ∀ {n} → ℕ → Sig → Tm n → Result (Tm n)
+viewCo k σ t with whnf k σ t
+... | fail m         = fail m
+... | ok (nu F)      = ok (inst F t)
+... | ok (alw A P s) = ok (alwStep A P s)
+... | ok (bsm A a b) = ok (bsmStep A a b)
+... | ok t′         = fail ("expected ν, got " ++ showTm t′)
+
 splitData : ∀ {n} → Sig → ℕ → List (Tm n) → Result (ℕ × List (Tm n) × List (Tm n))
 splitData σ i args =
   lookupData σ i >>= λ d →
@@ -684,6 +738,8 @@ mutual
   hasSelf s (addt t u)     = hasSelf s t ∨ hasSelf s u
   hasSelf s (toi64 t)      = hasSelf s t
   hasSelf s (packi x y)    = hasSelf s x ∨ hasSelf s y
+  hasSelf s (alw A P t)    = hasSelf s A ∨ hasSelf s P ∨ hasSelf s t
+  hasSelf s (bsm A a b)    = hasSelf s A ∨ hasSelf s a ∨ hasSelf s b
   hasSelf s (lam _ A t)    = hasSelf s A ∨ hasSelf s t
   hasSelf s (pi _ A B)     = hasSelf s A ∨ hasSelf s B
   hasSelf s (prod A B)     = hasSelf s A ∨ hasSelf s B
@@ -725,6 +781,10 @@ checkNu _    T t = go T t
     go (pi _ _ B) (lam _ _ u) = go B u
     go (nu _)     (unf _ _)   = ok tt
     go (nu _)     _           = fail "ν value must be an unfold"
+    go (alw _ _ _) (unf _ _)  = ok tt
+    go (alw _ _ _) _          = fail "ν value must be an unfold"
+    go (bsm _ _ _) (unf _ _)  = ok tt
+    go (bsm _ _ _) _          = fail "ν value must be an unfold"
     go _          _           = ok tt
 
 mutual
@@ -755,6 +815,8 @@ mutual
   occurs x (addt t u)     = occurs x t ∨ occurs x u
   occurs x (toi64 t)      = occurs x t
   occurs x (packi a b)    = occurs x a ∨ occurs x b
+  occurs x (alw A P s)    = occurs x A ∨ occurs x P ∨ occurs x s
+  occurs x (bsm A a b)    = occurs x A ∨ occurs x a ∨ occurs x b
   occurs _ _              = false
 
   occursList : ∀ {n} → Fin n → List (Tm n) → Bool
@@ -798,6 +860,8 @@ mutual
   occursD i (addt t u)     = occursD i t ∨ occursD i u
   occursD i (toi64 t)      = occursD i t
   occursD i (packi a b)    = occursD i a ∨ occursD i b
+  occursD i (alw A P s)    = occursD i A ∨ occursD i P ∨ occursD i s
+  occursD i (bsm A a b)    = occursD i A ∨ occursD i a ∨ occursD i b
   occursD _ _              = false
 
   occursDList : ∀ {n} → ℕ → List (Tm n) → Bool
@@ -1244,6 +1308,23 @@ mutual
     guard "ν body is not strictly positive" (strictPos F) >>
     ok (typ , u0s)
 
+  -- ⇒-alw / ⇒-bsm
+  infer′ k σ rs Γ (alw _ _ _) run _ = fail "no promotion: Always is an erased term"
+  infer′ k σ rs Γ (alw _ _ _) evid _ = fail "no promotion: Always is an erased term"
+  infer′ k σ rs Γ (alw A P s) spec _ =
+    checkTy k σ rs Γ A >>
+    check k σ rs Γ spec P (pi affine A typ) >>
+    check k σ rs Γ spec s (stream A) >>
+    ok (typ , u0s)
+  infer′ k σ rs Γ (bsm _ _ _) run _ = fail "no promotion: ~ is an erased term"
+  infer′ k σ rs Γ (bsm _ _ _) evid _ = fail "no promotion: ~ is an erased term"
+  infer′ k σ rs Γ (bsm A a b) spec _ =
+    checkTy k σ rs Γ A >>
+    floatIdOk k σ A >>
+    check k σ rs Γ spec a (stream A) >>
+    check k σ rs Γ spec b (stream A) >>
+    ok (typ , u0s)
+
   -- ⇒-pair
   infer′ k σ rs Γ (pair a b) m _ =
     infer k σ rs Γ m a >>= λ (A , au) →
@@ -1281,8 +1362,8 @@ mutual
   -- ⇒-ucons
   infer′ k σ rs Γ (ucons s) m _ =
     infer k σ rs Γ m s >>= λ (T , u) →
-    viewNu k σ T >>= λ F →
-    ok (inst F T , u)
+    viewCo k σ T >>= λ U →
+    ok (U , u)
 
   -- ⇒-i64 / ⇒-f32ty / ⇒-tensor  (spec formers)
   infer′ k σ rs Γ i64 run _ = fail "no promotion: I64 is an erased term"
@@ -1364,9 +1445,21 @@ mutual
        checkBound m affine ua >>
        combine m eu tus
 
-  -- ⇐-unf (λ may be affine or + on Data)
-  check′ k σ rs Γ m (unf seed (lam q A t)) T =
-    viewNu k σ T >>= λ F →
+  -- ⇐-unf, by the expected type (checkUnf)
+  check′ k σ rs Γ m (unf seed f) T =
+    whnf k σ T >>= checkUnf k σ rs Γ m seed f
+
+  -- ⇐-ctor / ⇐-conv (default)
+  check′ k σ rs Γ m e A = checkAgainst k σ rs Γ m e A (viewData k σ A) (ctorSpine e)
+
+  -- ⇐-unf into ν F: the λ takes the seed (affine, or + on Data).
+  -- Into Always A P s and σ ~ τ (⇐-unf-alw, ⇐-unf-bsm) it takes the
+  -- current stream(s) and an invariant x : I over them. The seed is I at
+  -- s (at σ, τ); the body proves the head obligation at the current
+  -- stream(s) and gives I at the tail(s). The streams are variables, so
+  -- an invariant that ignores them must prove the obligation everywhere.
+  checkUnf : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Tm n → Result (UseVec n)
+  checkUnf k σ rs Γ m seed (lam q A t) (nu F) =
     infer k σ rs Γ m seed >>= λ (S , seedU) →
     conv k σ A S >>
     check k σ (extRec rs false false) (ext Γ q S) m t (wk (inst F S)) >>= λ uses →
@@ -1374,16 +1467,52 @@ mutual
     in checkBound m q u₀ >>
        checkUnfold k σ m rs (lam q A t) >>
        combine m seedU us
-
-  check′ k σ rs Γ m (unf seed f) T =
-    viewNu k σ T >>= λ F →
+  checkUnf k σ rs Γ m seed f (nu F) =
     infer k σ rs Γ m seed >>= λ (S , seedU) →
     check k σ rs Γ m f (pi affine S (wk (inst F S))) >>= λ fu →
     checkUnfold k σ m rs f >>
     combine m seedU fu
-
-  -- ⇐-ctor / ⇐-conv (default)
-  check′ k σ rs Γ m e A = checkAgainst k σ rs Γ m e A (viewData k σ A) (ctorSpine e)
+  checkUnf k σ rs Γ m seed (lam q Ts (lam q′ I t)) (alw A P s) =
+    guard "+ requires a Data type" (not (eqQty q reuse)) >>
+    checkTy k σ rs Γ Ts >>
+    conv k σ Ts (stream A) >>
+    checkTy k σ (extRec rs false false) (ext Γ q Ts) I >>
+    (if eqQty q′ reuse then isData k σ I >>= guard "+ requires a Data type" else ok tt) >>
+    check k σ rs Γ m seed (inst I s) >>= λ seedU →
+    check k σ (extRec (extRec rs false false) false false) (ext (ext Γ q Ts) q′ I) m t
+          (prod (app (wk (wk P)) (headTm (var (suc zero)))) (wk (atTail I))) >>= λ uses →
+    let (ux , us₁) = headTailU uses
+        (ut , us)  = headTailU us₁
+    in checkBound m q′ ux >>
+       checkBound m q ut >>
+       checkUnfold k σ m rs (lam q Ts (lam q′ I t)) >>
+       combine m seedU us
+  checkUnf k σ rs Γ m seed (lam qa Ta (lam qb Tb (lam qx I t))) (bsm A a b) =
+    guard "+ requires a Data type" (not (eqQty qa reuse) ∧ not (eqQty qb reuse)) >>
+    checkTy k σ rs Γ Ta >>
+    conv k σ Ta (stream A) >>
+    checkTy k σ (extRec rs false false) (ext Γ qa Ta) Tb >>
+    conv k σ Tb (wk (stream A)) >>
+    checkTy k σ (extRec (extRec rs false false) false false) (ext (ext Γ qa Ta) qb Tb) I >>
+    (if eqQty qx reuse then isData k σ I >>= guard "+ requires a Data type" else ok tt) >>
+    check k σ rs Γ m seed (inst₂ I a b) >>= λ seedU →
+    check k σ (extRec (extRec (extRec rs false false) false false) false false)
+          (ext (ext (ext Γ qa Ta) qb Tb) qx I) m t
+          (prod (idt (wk (wk (wk A))) (headTm (var (suc (suc zero)))) (headTm (var (suc zero))))
+                (wk (atTails I))) >>= λ uses →
+    let (ux , us₁) = headTailU uses
+        (ub , us₂) = headTailU us₁
+        (ua , us)  = headTailU us₂
+    in checkBound m qx ux >>
+       checkBound m qb ub >>
+       checkBound m qa ua >>
+       checkUnfold k σ m rs (lam qa Ta (lam qb Tb (lam qx I t))) >>
+       combine m seedU us
+  checkUnf k σ rs Γ m seed f (alw _ _ _) =
+    fail "unfold into Always takes λ (t : Stream A) (x : I) → (p, x′)"
+  checkUnf k σ rs Γ m seed f (bsm _ _ _) =
+    fail "unfold into ~ takes λ (a : Stream A) (b : Stream A) (x : I) → (e, x′)"
+  checkUnf k σ rs Γ m seed f T′ = fail ("expected ν, got " ++ showTm T′)
 
   checkLam : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Tm n → Result (Qty × Tm n × Tm (suc n)) → Result (UseVec n)
   checkLam k σ rs Γ m e T (fail _) = inferConv k σ rs Γ m e T

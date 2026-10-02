@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.13.0
+
+`Always A P s` and `σ ~ τ` constrain every element. They were `ν Y. P (head s) × Y` and `ν R. {head σ ≡ head τ} × R`: the recursion never moved to the tail, so both said something about the head only. `unfold tt (λ (_ : Unit) → (refl, tt))` proved `Always Nat IsZero (natsFrom 0)` and `natsFrom 0 ~ zeros`, and a proof of `Always A P s` gave `P (head s)` at every depth. They are now formers of their own, indexed by the stream. `uncons` of a proof gives `P (head s) × Always A P (tail s)` and `{head σ ≡ head τ : A} × (tail σ ~ tail τ)`. An unfold into them takes the current stream(s) and an invariant `x : I` over them: the seed is `I` at `s` (at `σ, τ`), and the body proves the head obligation and gives `I` at the tail(s). Proofs of `Always` and `~` written for 0.12.0 must be rewritten.
+
+### Language
+
+- `Always A P s` keeps `A`. `P` is checked against `Π (x : A) → Type` and `s` against `Stream A`. `σ ~ τ` takes `A` from `σ`.
+- An unfold into `Always A P s` is `unfold seed (λ (t : Stream A) → λ (x : I) → (p, next))`; into `σ ~ τ`, `unfold seed (λ (a : Stream A) → λ (b : Stream A) → λ (x : I) → (e, next))`. Any other step is refused with `unfold into Always takes …` or `unfold into ~ takes …`. A stream binder may not be `+`.
+
+### Agda
+
+- `Syntax.alw`, `Syntax.bsm` (tags 38, 39), carried through `Subst`, `SubstLemmas`, `Reduction`, `Convert` (`Foreign`), `Spine`, `Tag`, `Unembed`, `Consistency`, `Soundness.Conv`, `Soundness.Views`. `Subst.headTm`, `tailTm`, `alwStep`, `bsmStep`, `atTail`, `atTails`. The ν encodings `Subst.always` and `Subst.bisim` are gone.
+- `Check`: rules `⇒-alw`, `⇒-bsm`, `⇒-ucons-alw`, `⇒-ucons-bsm`, `⇐-unf-alw`, `⇐-unf-bsm`; `viewCo` for `uncons`; `checkUnf` for an unfold by its expected type. Like ν, they are outside the proved ⊢ fragment.
+- `ExampleAlways`, `ExampleBisim`: the new proofs, and `refl` proofs that the checker refuses `natsFrom 0` being all zeros and `natsFrom 0 ~ zeros`, three ways each.
+
+### Elixir
+
+- `{:always, A, P, s}` is a de Bruijn term (it was expanded to ν in `to_db`), with `Subst`, `Print`, conversion, and occurrence clauses. `{:bisim, σ, τ}` converts componentwise.
+- `Check.view_co`, `Check.check_unf`; `expand_bisim` and `as_nu` are gone.
+- `examples/always.muro`, `examples/bisim.muro`, and tests: the head-only proofs are refused, an invariant that fails at the tail is refused, and `uncons` of a proof gives the obligation at the tail.
+
+### Manual
+
+- `streams.md`, `grammar.md`, `examples.md`, README.
+
+### Package
+
+- Version 0.13.0.
+
 ## 0.12.0
 
 `mix muro.emit` writes the `run` definitions of a file. The default backend is Elixir, the same text as `Muro.emit_file/3`. `--backend c` writes `<name>.h` and `<name>.c` next to the file. C is a closed book of `Nat`, `Unit`, and user data (`match` is a `switch`, erased arguments are dropped, `run internal` is `static`). A run that mentions `Stream` or `I64` / `F32` / `Tensor` is refused (`c:stream`, `c:machine`) and still emits on the Elixir backend. There is no new tag.

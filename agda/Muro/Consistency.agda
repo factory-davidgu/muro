@@ -186,6 +186,8 @@ ne-untyped-⇒ (ne-foreign f-muli) ()
 ne-untyped-⇒ (ne-foreign f-addt) ()
 ne-untyped-⇒ (ne-foreign f-toi64) ()
 ne-untyped-⇒ (ne-foreign f-packi) ()
+ne-untyped-⇒ (ne-foreign f-alw) ()
+ne-untyped-⇒ (ne-foreign f-bsm) ()
 
 ne-untyped-⇐ ne (⇐-conv D _) = ne-untyped-⇒ ne D
 ne-untyped-⇐ _ (⇐-ctor _ _ lk _ _ _ _ _ _) = fail≢ok lk

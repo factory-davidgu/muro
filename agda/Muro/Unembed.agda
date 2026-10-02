@@ -104,6 +104,10 @@ mutual
   unembedN nxt env (toi64 t)      = toi64 <$> unembedN nxt env t
   unembedN nxt env (packi x y)    =
     packi <$> unembedN nxt env x ⊛ unembedN nxt env y
+  unembedN nxt env (alw A P s)    =
+    alw <$> unembedN nxt env A ⊛ unembedN nxt env P ⊛ unembedN nxt env s
+  unembedN nxt env (bsm A a b)    =
+    bsm <$> unembedN nxt env A ⊛ unembedN nxt env a ⊛ unembedN nxt env b
 
 unembed : PTm ℕ → Result (Tm 0)
 unembed t = unembedN 0 [] t

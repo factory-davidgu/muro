@@ -523,6 +523,16 @@ defmodule Muro.Check do
 
   defp conv_n(k, book, names, {:nu, f}, {:nu, f1}), do: conv(k, book, names, f, f1)
 
+  defp conv_n(k, book, names, {:always, a, p, s}, {:always, a1, p1, s1}) do
+    with :ok <- conv(k, book, names, a, a1),
+         :ok <- conv(k, book, names, p, p1),
+         do: conv(k, book, names, s, s1)
+  end
+
+  defp conv_n(k, book, names, {:bisim, s, t}, {:bisim, s1, t1}) do
+    with :ok <- conv(k, book, names, s, s1), do: conv(k, book, names, t, t1)
+  end
+
   defp conv_n(k, book, names, {:unf, s, f}, {:unf, s1, f1}) do
     with :ok <- conv(k, book, names, s, s1), do: conv(k, book, names, f, f1)
   end
@@ -635,7 +645,6 @@ defmodule Muro.Check do
     end
   end
 
-  # ⇒-bisim / ⇐-unf: σ ~ τ = ν R. {head σ ≡ head τ} × R
   defp payload_ty(k, book, f) do
     case view_prod(k, book, Subst.inst(f, :unit), []) do
       {:ok, {a, _}} -> {:ok, a}
@@ -643,24 +652,45 @@ defmodule Muro.Check do
     end
   end
 
-  defp expand_bisim(k, book, rs, gamma, s, t) do
+  # The element type A of a stream s : Stream A = ν X. A × X.
+  defp stream_elem(k, book, rs, gamma, s) do
     with {:ok, {ts, _}} <- infer(k, book, rs, gamma, :spec, s),
          {:ok, f} <- view_nu(k, book, ts, names_of(rs, gamma)),
-         {:ok, a} <- payload_ty(k, book, f),
-         {:ok, {tt, _}} <- infer(k, book, rs, gamma, :spec, t),
-         :ok <- conv(k, book, names_of(rs, gamma), ts, tt) do
-      id = {:idt, a, {:letp, {:ucons, s}, {:var, 1}}, {:letp, {:ucons, t}, {:var, 1}}}
-      {:ok, {:nu, {:prod, Subst.wk(id), {:var, 0}}}}
-    end
+         do: payload_ty(k, book, f)
   end
 
-  defp as_nu(k, book, rs, gamma, t) do
+  defp stream_ty(a), do: {:nu, {:prod, Subst.wk(a), {:var, 0}}}
+  defp head_tm(s), do: {:letp, {:ucons, s}, {:var, 1}}
+  defp tail_tm(s), do: {:letp, {:ucons, s}, {:var, 0}}
+
+  # An invariant over the current stream (var 0), moved to its tail.
+  defp at_tail(i) do
+    Subst.inst(Subst.ren(Subst.lift(&(&1 + 1)), i), tail_tm({:var, 0}))
+  end
+
+  # An invariant over two streams (var 1, var 0), moved to their tails.
+  defp at_tails(i) do
+    Subst.inst2(
+      Subst.ren(Subst.lift(Subst.lift(&(&1 + 2))), i),
+      tail_tm({:var, 1}),
+      tail_tm({:var, 0})
+    )
+  end
+
+  # ⇒-ucons: ν F unrolls once; Always A P s gives P (head s) ×
+  # Always A P (tail s); σ ~ τ gives {head σ ≡ head τ} × (tail σ ~ tail τ).
+  defp view_co(k, book, rs, gamma, t) do
     case whnf(k, book, t) do
       {:ok, {:nu, f}} ->
-        {:ok, f}
+        {:ok, Subst.inst(f, t)}
+
+      {:ok, {:always, a, p, s}} ->
+        {:ok, {:prod, {:app, p, head_tm(s)}, {:always, a, p, tail_tm(s)}}}
 
       {:ok, {:bisim, s, u}} ->
-        with {:ok, {:nu, f}} <- expand_bisim(k, book, rs, gamma, s, u), do: {:ok, f}
+        with {:ok, a} <- stream_elem(k, book, rs, gamma, s) do
+          {:ok, {:prod, {:idt, a, head_tm(s), head_tm(u)}, {:bisim, tail_tm(s), tail_tm(u)}}}
+        end
 
       {:ok, t1} ->
         {:error, "expected ν, got #{Print.term(t1, names_of(rs, gamma))}"}
@@ -739,6 +769,9 @@ defmodule Muro.Check do
   defp has_self?(self, {:nu, f}), do: has_self?(self, f)
   defp has_self?(self, {:bisim, s, t}), do: has_self?(self, s) or has_self?(self, t)
 
+  defp has_self?(self, {:always, a, p, s}),
+    do: has_self?(self, a) or has_self?(self, p) or has_self?(self, s)
+
   defp has_self?(self, {:mdata, e, p, bs}) do
     has_self?(self, e) or has_self?(self, p) or
       Enum.any?(bs, fn {_, _, b} -> has_self?(self, b) end)
@@ -756,6 +789,7 @@ defmodule Muro.Check do
   defp occurs?(x, {:letp, e, t}), do: occurs?(x, e) or occurs?(x + 2, t)
   defp occurs?(x, {:nu, f}), do: occurs?(x + 1, f)
   defp occurs?(x, {:bisim, s, t}), do: occurs?(x, s) or occurs?(x, t)
+  defp occurs?(x, {:always, a, p, s}), do: occurs?(x, a) or occurs?(x, p) or occurs?(x, s)
 
   defp occurs?(x, {:mdata, e, p, bs}) do
     occurs?(x, e) or occurs?(x + 1, p) or
@@ -806,8 +840,10 @@ defmodule Muro.Check do
   defp go_nu({:pi, _, _, _, b}, {:lam, _, _, _, t}), do: go_nu(b, t)
   defp go_nu({:nu, _}, {:unf, _, _}), do: :ok
   defp go_nu({:bisim, _, _}, {:unf, _, _}), do: :ok
+  defp go_nu({:always, _, _, _}, {:unf, _, _}), do: :ok
   defp go_nu({:nu, _}, _), do: {:error, "ν value must be an unfold"}
   defp go_nu({:bisim, _, _}, _), do: {:error, "ν value must be an unfold"}
+  defp go_nu({:always, _, _, _}, _), do: {:error, "ν value must be an unfold"}
   defp go_nu(_, _), do: :ok
 
   # -- infer / check ---------------------------------------------------------
@@ -1121,7 +1157,19 @@ defmodule Muro.Check do
         {:error, "no promotion: ~ is an erased term"}
 
       {:spec, {:bisim, s, t}} ->
-        with {:ok, _} <- expand_bisim(k, book, rs, gamma, s, t),
+        with {:ok, a} <- stream_elem(k, book, rs, gamma, s),
+             :ok <- float_id_ok(k, book, a),
+             {:ok, _} <- check(k, book, rs, gamma, :spec, t, stream_ty(a)),
+             do: {:ok, {:typ, u0s(n)}}
+
+      # ⇒-always: P is a predicate on A, s a stream of A
+      {m, {:always, _, _, _}} when m in [:run, :evidence] ->
+        {:error, "no promotion: Always is an erased term"}
+
+      {:spec, {:always, a, p, s}} ->
+        with :ok <- check_ty(k, book, rs, gamma, a),
+             {:ok, _} <- check(k, book, rs, gamma, :spec, p, {:pi, :affine, a, "_", :typ}),
+             {:ok, _} <- check(k, book, rs, gamma, :spec, s, stream_ty(a)),
              do: {:ok, {:typ, u0s(n)}}
 
       # ⇒-pair
@@ -1169,8 +1217,8 @@ defmodule Muro.Check do
       # ⇒-ucons
       {m, {:ucons, s}} ->
         with {:ok, {tt, u}} <- infer(k, book, rs, gamma, m, s),
-             {:ok, f} <- view_nu(k, book, tt, names_of(rs, gamma)) do
-          {:ok, {Subst.inst(f, tt), u}}
+             {:ok, ty} <- view_co(k, book, rs, gamma, tt) do
+          {:ok, {ty, u}}
         end
 
       # ⇒-i64 / ⇒-f32ty / ⇒-tensor
@@ -1379,40 +1427,10 @@ defmodule Muro.Check do
              :ok <- check_bound(mode, :affine, ua),
              do: combine(mode, eu, tus)
 
-      # ⇐-unf
-      {:unf, seed, {:lam, q, a_ann, x, t}} ->
-        with {:ok, fu_ty} <- as_nu(k, book, rs, gamma, a),
-             {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
-             :ok <- conv(k, book, names_of(rs, gamma), a_ann, s_ty),
-             {:ok, [u0 | us]} <-
-               check(
-                 k,
-                 book,
-                 push_name(ext_rec(rs, false, false), x),
-                 ext(gamma, q, s_ty),
-                 mode,
-                 t,
-                 Subst.wk(Subst.inst(fu_ty, s_ty))
-               ),
-             :ok <- check_bound(mode, q, u0),
-             :ok <- check_unfold(k, book, mode, rs, {:lam, q, a_ann, x, t}),
-             do: combine(mode, seed_u, us)
-
+      # ⇐-unf, by the expected type (check_unf)
       {:unf, seed, f} ->
-        with {:ok, fu_ty} <- as_nu(k, book, rs, gamma, a),
-             {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
-             {:ok, fu} <-
-               check(
-                 k,
-                 book,
-                 rs,
-                 gamma,
-                 mode,
-                 f,
-                 {:pi, :affine, s_ty, "_", Subst.wk(Subst.inst(fu_ty, s_ty))}
-               ),
-             :ok <- check_unfold(k, book, mode, rs, f),
-             do: combine(mode, seed_u, fu)
+        with {:ok, ty} <- whnf(k, book, a),
+             do: check_unf(k, book, rs, gamma, mode, seed, f, ty)
 
       # ⇐-ctor / ⇐-conv
       _ ->
@@ -1810,6 +1828,140 @@ defmodule Muro.Check do
     end
   end
 
+  # ⇐-unf into ν F: the λ takes the seed (affine, or + on Data). Into
+  # Always A P s and σ ~ τ it takes the current stream(s) and an invariant
+  # x : I over them. The seed is I at s (at σ, τ); the body proves the
+  # head obligation at the current stream(s) and gives I at the tail(s).
+  # The streams are variables, so an invariant that ignores them must
+  # prove the obligation at every stream.
+  defp check_unf(k, book, rs, gamma, mode, seed, {:lam, q, a_ann, x, t}, {:nu, fu_ty}) do
+    with {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
+         :ok <- conv(k, book, names_of(rs, gamma), a_ann, s_ty),
+         {:ok, [u0 | us]} <-
+           check(
+             k,
+             book,
+             push_name(ext_rec(rs, false, false), x),
+             ext(gamma, q, s_ty),
+             mode,
+             t,
+             Subst.wk(Subst.inst(fu_ty, s_ty))
+           ),
+         :ok <- check_bound(mode, q, u0),
+         :ok <- check_unfold(k, book, mode, rs, {:lam, q, a_ann, x, t}),
+         do: combine(mode, seed_u, us)
+  end
+
+  defp check_unf(k, book, rs, gamma, mode, seed, f, {:nu, fu_ty}) do
+    with {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
+         {:ok, fu} <-
+           check(
+             k,
+             book,
+             rs,
+             gamma,
+             mode,
+             f,
+             {:pi, :affine, s_ty, "_", Subst.wk(Subst.inst(fu_ty, s_ty))}
+           ),
+         :ok <- check_unfold(k, book, mode, rs, f),
+         do: combine(mode, seed_u, fu)
+  end
+
+  defp check_unf(
+         k,
+         book,
+         rs,
+         gamma,
+         mode,
+         seed,
+         {:lam, q, ts, x, {:lam, qi, i, y, t}} = f,
+         {:always, a, p, s}
+       ) do
+    rs1 = push_name(ext_rec(rs, false, false), x)
+    g1 = ext(gamma, q, ts)
+    head = {:app, Subst.wk(Subst.wk(p)), head_tm({:var, 1})}
+
+    with :ok <- stream_binder(q),
+         :ok <- check_ty(k, book, rs, gamma, ts),
+         :ok <- conv(k, book, names_of(rs, gamma), ts, stream_ty(a)),
+         :ok <- check_ty(k, book, rs1, g1, i),
+         :ok <- invariant_binder(k, book, qi, i),
+         {:ok, seed_u} <- check(k, book, rs, gamma, mode, seed, Subst.inst(i, s)),
+         {:ok, [ux, ut | us]} <-
+           check(
+             k,
+             book,
+             push_name(ext_rec(rs1, false, false), y),
+             ext(g1, qi, i),
+             mode,
+             t,
+             {:prod, head, Subst.wk(at_tail(i))}
+           ),
+         :ok <- check_bound(mode, qi, ux),
+         :ok <- check_bound(mode, q, ut),
+         :ok <- check_unfold(k, book, mode, rs, f),
+         do: combine(mode, seed_u, us)
+  end
+
+  defp check_unf(
+         k,
+         book,
+         rs,
+         gamma,
+         mode,
+         seed,
+         {:lam, qa, ta, xa, {:lam, qb, tb, xb, {:lam, qx, i, y, t}}} = f,
+         {:bisim, s, u}
+       ) do
+    rs1 = push_name(ext_rec(rs, false, false), xa)
+    g1 = ext(gamma, qa, ta)
+    rs2 = push_name(ext_rec(rs1, false, false), xb)
+    g2 = ext(g1, qb, tb)
+
+    with {:ok, a} <- stream_elem(k, book, rs, gamma, s),
+         :ok <- stream_binder(qa),
+         :ok <- stream_binder(qb),
+         :ok <- check_ty(k, book, rs, gamma, ta),
+         :ok <- conv(k, book, names_of(rs, gamma), ta, stream_ty(a)),
+         :ok <- check_ty(k, book, rs1, g1, tb),
+         :ok <- conv(k, book, names_of(rs1, g1), tb, Subst.wk(stream_ty(a))),
+         :ok <- check_ty(k, book, rs2, g2, i),
+         :ok <- invariant_binder(k, book, qx, i),
+         {:ok, seed_u} <- check(k, book, rs, gamma, mode, seed, Subst.inst2(i, s, u)),
+         head = {:idt, Subst.wk(Subst.wk(Subst.wk(a))), head_tm({:var, 2}), head_tm({:var, 1})},
+         {:ok, [ux, ub, ua | us]} <-
+           check(
+             k,
+             book,
+             push_name(ext_rec(rs2, false, false), y),
+             ext(g2, qx, i),
+             mode,
+             t,
+             {:prod, head, Subst.wk(at_tails(i))}
+           ),
+         :ok <- check_bound(mode, qx, ux),
+         :ok <- check_bound(mode, qb, ub),
+         :ok <- check_bound(mode, qa, ua),
+         :ok <- check_unfold(k, book, mode, rs, f),
+         do: combine(mode, seed_u, us)
+  end
+
+  defp check_unf(_k, _book, _rs, _gamma, _mode, _seed, _f, {:always, _, _, _}),
+    do: {:error, "unfold into Always takes λ (t : Stream A) (x : I) → (p, x′)"}
+
+  defp check_unf(_k, _book, _rs, _gamma, _mode, _seed, _f, {:bisim, _, _}),
+    do: {:error, "unfold into ~ takes λ (a : Stream A) (b : Stream A) (x : I) → (e, x′)"}
+
+  defp check_unf(_k, _book, rs, gamma, _mode, _seed, _f, t1),
+    do: {:error, "expected ν, got #{Print.term(t1, names_of(rs, gamma))}"}
+
+  defp stream_binder(:reuse), do: {:error, "+ requires a Data type"}
+  defp stream_binder(_), do: :ok
+
+  defp invariant_binder(k, book, :reuse, i), do: guard_data(k, book, i, "+ requires a Data type")
+  defp invariant_binder(_k, _book, _, _i), do: :ok
+
   defp occurs_d?(i, {:def, n}), do: n == i
   defp occurs_d?(i, {:app, f, a}), do: occurs_d?(i, f) or occurs_d?(i, a)
   defp occurs_d?(i, {:pi, _, a, _, b}), do: occurs_d?(i, a) or occurs_d?(i, b)
@@ -1822,6 +1974,11 @@ defmodule Muro.Check do
   defp occurs_d?(i, {:nu, f}), do: occurs_d?(i, f)
   defp occurs_d?(i, {:unf, s, f}), do: occurs_d?(i, s) or occurs_d?(i, f)
   defp occurs_d?(i, {:ucons, s}), do: occurs_d?(i, s)
+  defp occurs_d?(i, {:bisim, s, t}), do: occurs_d?(i, s) or occurs_d?(i, t)
+
+  defp occurs_d?(i, {:always, a, p, s}),
+    do: occurs_d?(i, a) or occurs_d?(i, p) or occurs_d?(i, s)
+
   defp occurs_d?(i, {:ann, e, a}), do: occurs_d?(i, e) or occurs_d?(i, a)
   defp occurs_d?(i, {:tensor, d, s}), do: occurs_d?(i, d) or occurs_d?(i, s)
   defp occurs_d?(i, {:addi, a, b}), do: occurs_d?(i, a) or occurs_d?(i, b)

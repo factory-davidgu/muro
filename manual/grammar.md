@@ -39,6 +39,8 @@ atom       ::= "Type" | "Nat" | "I64" | "F32" | "Unit" | "Empty" | "refl" | "tt"
 suc        ::= "suc" "(" term ")" | "suc" atom
 stream     ::= "Stream" atom
 unfold     ::= "unfold" atom atom         -- seed, λ s → (head, next_seed)
+                                        -- into Always: λ t → λ x → (p, next_seed)
+                                        -- into ~: λ a → λ b → λ x → (e, next_seed)
 uncons     ::= "uncons" atom
 qty        ::= "+" | "-" | ε               -- ε = affine (default)
 binder     ::= "(" qty ident ":" term ")"

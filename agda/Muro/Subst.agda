@@ -59,6 +59,8 @@ mutual
   ren ρ (addt t u)    = addt (ren ρ t) (ren ρ u)
   ren ρ (toi64 t)     = toi64 (ren ρ t)
   ren ρ (packi x y)   = packi (ren ρ x) (ren ρ y)
+  ren ρ (alw A P s)   = alw (ren ρ A) (ren ρ P) (ren ρ s)
+  ren ρ (bsm A a b)   = bsm (ren ρ A) (ren ρ a) (ren ρ b)
 
   renList : ∀ {n m} → (Fin n → Fin m) → List (Tm n) → List (Tm m)
   renList ρ []       = []
@@ -120,6 +122,8 @@ mutual
   renM ρ (addt t u) = addt <$> renM ρ t ⊛ renM ρ u
   renM ρ (toi64 t) = toi64 <$> renM ρ t
   renM ρ (packi x y) = packi <$> renM ρ x ⊛ renM ρ y
+  renM ρ (alw A P s) = alw <$> renM ρ A ⊛ renM ρ P ⊛ renM ρ s
+  renM ρ (bsm A a b) = bsm <$> renM ρ A ⊛ renM ρ a ⊛ renM ρ b
 
   renMList : ∀ {n m} → (Fin n → Result (Fin m)) → List (Tm n) → Result (List (Tm m))
   renMList ρ []       = ok []
@@ -140,14 +144,19 @@ fstTm t = letp t (var (suc zero))
 sndTm : ∀ {n} → Tm n → Tm n
 sndTm t = letp t (var zero)
 
--- Always P s = ν Y. P (head s) × Y
-always : ∀ {n} → Tm n → Tm n → Tm n
-always P s = nu (prod (wk (app P (fstTm (ucons s)))) (var zero))
+headTm : ∀ {n} → Tm n → Tm n
+headTm s = fstTm (ucons s)
 
--- σ ~ τ = ν R. {head σ ≡ head τ : A} × R
-bisim : ∀ {n} → Tm n → Tm n → Tm n → Tm n
-bisim A σ τ =
-  nu (prod (wk (idt A (fstTm (ucons σ)) (fstTm (ucons τ)))) (var zero))
+tailTm : ∀ {n} → Tm n → Tm n
+tailTm s = sndTm (ucons s)
+
+-- One uncons of Always A P s: P at the head, Always A P at the tail.
+alwStep : ∀ {n} → Tm n → Tm n → Tm n → Tm n
+alwStep A P s = prod (app P (headTm s)) (alw A P (tailTm s))
+
+-- One uncons of σ ~ τ: the heads are equal, the tails are related.
+bsmStep : ∀ {n} → Tm n → Tm n → Tm n → Tm n
+bsmStep A σ τ = prod (idt A (headTm σ) (headTm τ)) (bsm A (tailTm σ) (tailTm τ))
 
 fromZero : ∀ {n} → Fin 0 → Fin n
 fromZero ()
@@ -197,6 +206,8 @@ mutual
   sub σ (addt t u)     = addt (sub σ t) (sub σ u)
   sub σ (toi64 t)      = toi64 (sub σ t)
   sub σ (packi x y)    = packi (sub σ x) (sub σ y)
+  sub σ (alw A P s)    = alw (sub σ A) (sub σ P) (sub σ s)
+  sub σ (bsm A a b)    = bsm (sub σ A) (sub σ a) (sub σ b)
 
   subList : ∀ {n m} → (Fin n → Tm m) → List (Tm n) → List (Tm m)
   subList σ []       = []
@@ -214,6 +225,18 @@ inst t u = sub (instσ u) t
 -- Open two binders: (x. y. t)[a, b], y the inner one (var 0).
 inst₂ : ∀ {n} → Tm (suc (suc n)) → Tm n → Tm n → Tm n
 inst₂ t a b = inst (inst t (wk b)) a
+
+-- An invariant over the current stream (var 0), moved to its tail.
+atTail : ∀ {n} → Tm (suc n) → Tm (suc n)
+atTail I = inst (ren (lift suc) I) (tailTm (var zero))
+
+wk₂ρ : ∀ {n} → Fin n → Fin (suc (suc n))
+wk₂ρ i = suc (suc i)
+
+-- An invariant over two streams (var 1, var 0), moved to their tails.
+atTails : ∀ {n} → Tm (suc (suc n)) → Tm (suc (suc n))
+atTails I =
+  inst₂ (ren (lift (lift wk₂ρ)) I) (tailTm (var (suc zero))) (tailTm (var zero))
 
 motSucσ : ∀ {n} → Fin (suc n) → Tm (suc n)
 motSucσ zero    = su (var zero)
@@ -295,6 +318,8 @@ mutual
   toPHOAS ρ (addt t u)     = addt (toPHOAS ρ t) (toPHOAS ρ u)
   toPHOAS ρ (toi64 t)      = toi64 (toPHOAS ρ t)
   toPHOAS ρ (packi x y)    = packi (toPHOAS ρ x) (toPHOAS ρ y)
+  toPHOAS ρ (alw A P s)    = alw (toPHOAS ρ A) (toPHOAS ρ P) (toPHOAS ρ s)
+  toPHOAS ρ (bsm A a b)    = bsm (toPHOAS ρ A) (toPHOAS ρ a) (toPHOAS ρ b)
 
   toPHOASList : ∀ {n} {V : Set} → (Fin n → V) → List (Tm n) → List (PTm V)
   toPHOASList ρ []       = []

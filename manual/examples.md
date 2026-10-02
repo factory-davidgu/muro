@@ -50,11 +50,11 @@ A productive `run` Stream of zeros. `head-zeros` is `{head zeros ≡ 0 : Nat}` b
 
 ## always.muro
 
-`Always` as evidence: every head of `zeros` satisfies `{0 ≡ 0 : Nat}`.
+`Always` as evidence: every head of `zeros` satisfies `{0 ≡ 0 : Nat}` (a `Unit` invariant), and every head of `zeros` is `0` (the invariant `{t ≡ zeros}`).
 
 ## bisim.muro
 
-`zeros ~ zeros'` and `tail (natsFrom n) ~ natsFrom (suc n)`. Rutten’s stream calculus, Theorem 2.1. Evidence only.
+`zeros ~ zeros'` and `tail (natsFrom n) ~ natsFrom (suc n)`, both with the invariant `{a ≡ b}`. Rutten’s stream calculus, Theorem 2.1. Evidence only.
 
 See [Streams](streams.md).
 

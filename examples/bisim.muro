@@ -1,4 +1,7 @@
--- bisim.muro — σ ~ τ = ν R. {head σ ≡ head τ} × R
+-- bisim.muro — σ ~ τ: the heads are equal and the tails are related.
+-- uncons gives {head σ ≡ head τ} × (tail σ ~ tail τ). An unfold into it
+-- takes the current streams a, b and an invariant x : I over them; the
+-- seed is I at σ, τ. Here I is {a ≡ b}: equal streams are bisimilar.
 -- J.J.M.M. Rutten, Elements of Stream Calculus (An Extensive Exercise
 -- in Coinduction), ENTCS 45 (2001), Theorem 2.1.
 ν Stream (A : Type) : Type where
@@ -11,7 +14,9 @@ def zeros' : run Stream Nat :=
   unfold 0 (λ (_ : Nat) → (0, 0))
 
 def zeros-bisim : evidence zeros ~ zeros' :=
-  unfold tt (λ (_ : Unit) → (refl, tt))
+  unfold refl (λ (a : Stream Nat) → λ (b : Stream Nat) → λ (e : {a ≡ b : Stream Nat}) →
+    (rewrite e motive (λ x → {head x ≡ head b : Nat}) in refl,
+     rewrite e motive (λ x → {tail x ≡ tail b : Stream Nat}) in refl))
 
 def natsFrom : run Π (n : Nat) → Stream Nat :=
   λ (n : Nat) →
@@ -19,4 +24,6 @@ def natsFrom : run Π (n : Nat) → Stream Nat :=
 
 def nats-tail-bisim : evidence Π (n : Nat) → tail (natsFrom n) ~ natsFrom (suc n) :=
   λ (n : Nat) →
-    unfold tt (λ (_ : Unit) → (refl, tt))
+    unfold refl (λ (a : Stream Nat) → λ (b : Stream Nat) → λ (e : {a ≡ b : Stream Nat}) →
+      (rewrite e motive (λ x → {head x ≡ head b : Nat}) in refl,
+       rewrite e motive (λ x → {tail x ≡ tail b : Stream Nat}) in refl))

@@ -108,6 +108,8 @@ viewPi-sound k σ () | ok (muli _ _)
 viewPi-sound k σ () | ok (addt _ _)
 viewPi-sound k σ () | ok (toi64 _)
 viewPi-sound k σ () | ok (packi _ _)
+viewPi-sound k σ () | ok (alw _ _ _)
+viewPi-sound k σ () | ok (bsm _ _ _)
 
 viewProd-sound : ∀ k σ {n} {T : Tm n} {A B}
   → viewProd k σ T ≡ ok (A , B) → whnf k σ T ≡ ok (prod A B)
@@ -150,6 +152,8 @@ viewProd-sound k σ () | ok (muli _ _)
 viewProd-sound k σ () | ok (addt _ _)
 viewProd-sound k σ () | ok (toi64 _)
 viewProd-sound k σ () | ok (packi _ _)
+viewProd-sound k σ () | ok (alw _ _ _)
+viewProd-sound k σ () | ok (bsm _ _ _)
 
 viewId-sound : ∀ k σ {n} {T : Tm n} {A a b}
   → viewId k σ T ≡ ok (A , a , b) → whnf k σ T ≡ ok (idt A a b)
@@ -192,6 +196,8 @@ viewId-sound k σ () | ok (muli _ _)
 viewId-sound k σ () | ok (addt _ _)
 viewId-sound k σ () | ok (toi64 _)
 viewId-sound k σ () | ok (packi _ _)
+viewId-sound k σ () | ok (alw _ _ _)
+viewId-sound k σ () | ok (bsm _ _ _)
 
 viewData-sound : ∀ k σ {n} {T : Tm n} {di ps idxs}
   → viewData k σ T ≡ ok (di , ps , idxs)
@@ -371,6 +377,12 @@ isDataN-sound k σ fs Ft eq | ((toi64 _) , _) = ⊥-elim (false≢true (ok-inj e
   where false≢true : false ≡ true → ⊥
         false≢true ()
 isDataN-sound k σ fs Ft eq | ((packi _ _) , _) = ⊥-elim (false≢true (ok-inj eq))
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
+isDataN-sound k σ fs Ft eq | ((alw _ _ _) , _) = ⊥-elim (false≢true (ok-inj eq))
+  where false≢true : false ≡ true → ⊥
+        false≢true ()
+isDataN-sound k σ fs Ft eq | ((bsm _ _ _) , _) = ⊥-elim (false≢true (ok-inj eq))
   where false≢true : false ≡ true → ⊥
         false≢true ()
 

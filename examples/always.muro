@@ -1,9 +1,21 @@
--- always.muro — Always P s = ν Y. P (head s) × Y, same former as Stream.
+-- always.muro — Always A P s: P holds at every head of s.
+-- uncons gives P (head s) × Always A P (tail s). An unfold into it takes
+-- the current stream t and an invariant x : I over t; the seed is I at s.
 ν Stream (A : Type) : Type where
   uncons : Stream A → A × Stream A
 
 def zeros : run Stream Nat :=
   unfold 0 (λ (_ : Nat) → (0, 0))
 
+-- The obligation does not mention the stream: the invariant is Unit.
 def zeros-always-zero : evidence Always Nat (λ (_ : Nat) → {0 ≡ 0 : Nat}) zeros :=
-  unfold tt (λ (_ : Unit) → (refl, tt))
+  unfold tt (λ (t : Stream Nat) → λ (_ : Unit) → (refl, tt))
+
+def IsZero : spec Π (x : Nat) → Type :=
+  λ (x : Nat) → {x ≡ 0 : Nat}
+
+-- The invariant {t ≡ zeros}: rewrite reads the head and the tail off zeros.
+def zeros-all-zero : evidence Always Nat IsZero zeros :=
+  unfold refl (λ (t : Stream Nat) → λ (e : {t ≡ zeros : Stream Nat}) →
+    (rewrite e motive (λ x → IsZero (head x)) in refl,
+     rewrite e motive (λ x → {tail x ≡ zeros : Stream Nat}) in refl))

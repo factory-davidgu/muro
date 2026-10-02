@@ -366,7 +366,7 @@ defmodule Muro.CheckTest do
     bad = %{
       name: "bad",
       mode: :evidence,
-      type: {:always, p, {:var, "zeros"}},
+      type: {:always, :nat, p, {:var, "zeros"}},
       body: {:var, "bad"}
     }
 
@@ -402,6 +402,163 @@ defmodule Muro.CheckTest do
 
     assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded" or msg =~ "convert" or
              msg =~ "applied"
+  end
+
+  # natsFrom 0 = 0, 1, 2, ... and zeros = 0, 0, 0, ... agree at the head and
+  # nowhere else. The book proves that the second element of natsFrom 0 is 1
+  # and that 1 is not 0.
+  @streams_book ~S"""
+  ν Stream (A : Type) : Type where
+    uncons : Stream A → A × Stream A
+
+  def zeros : run Stream Nat :=
+    unfold 0 (λ (_ : Nat) → (0, 0))
+
+  def natsFrom : run Π (n : Nat) → Stream Nat :=
+    λ (n : Nat) →
+      unfold n (λ (+ k : Nat) → (k, suc k))
+
+  def IsZero : spec Π (x : Nat) → Type :=
+    λ (x : Nat) → {x ≡ 0 : Nat}
+
+  def Disc : spec Π (n : Nat) → Type :=
+    λ (n : Nat) →
+      match n motive (λ _ → Type)
+        | 0 => Empty
+        | suc p => Unit
+
+  def sym : evidence Π (-A : Type) → Π (-x : A) → Π (-y : A) →
+                     Π (e : {x ≡ y : A}) → {y ≡ x : A} :=
+    λ (-A : Type) → λ (-x : A) → λ (-y : A) → λ (e : {x ≡ y : A}) →
+      rewrite e motive (λ z → {y ≡ z : A}) in refl
+
+  def second-is-one : evidence {head (tail (natsFrom 0)) ≡ suc(0) : Nat} :=
+    refl
+
+  def one-ne-zero : evidence Π (e : {suc(0) ≡ 0 : Nat}) → Empty :=
+    λ (e : {suc(0) ≡ 0 : Nat}) →
+      rewrite sym Nat suc(0) 0 e motive (λ z → Disc z) in tt
+  """
+
+  test "natsFrom 0 is not all zeros: its second element is 1, and 1 is not 0" do
+    assert {:ok, book} = Parser.parse(@streams_book)
+    assert Check.check_sig(book) == :ok
+
+    second_is_zero = ~S"""
+    def second-is-zero : evidence {head (tail (natsFrom 0)) ≡ 0 : Nat} :=
+      refl
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> second_is_zero)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "second-is-zero"
+  end
+
+  test "Always constrains every element of the stream, not only the head" do
+    claim = ~S"""
+    def nats-always-zero : evidence Always Nat IsZero (natsFrom 0) :=
+      unfold tt (λ (_ : Unit) → (refl, tt))
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> claim)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "nats-always-zero"
+  end
+
+  test "~ relates every element of the two streams, not only the heads" do
+    claim = ~S"""
+    def nats-bisim-zeros : evidence natsFrom 0 ~ zeros :=
+      unfold tt (λ (_ : Unit) → (refl, tt))
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> claim)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "nats-bisim-zeros"
+  end
+
+  test "Always: an invariant that holds at the head but not at the tail is refused" do
+    zeros = ~S"""
+    def zeros-all-zero : evidence Always Nat IsZero zeros :=
+      unfold refl (λ (t : Stream Nat) → λ (e : {t ≡ zeros : Stream Nat}) →
+        (rewrite e motive (λ x → IsZero (head x)) in refl,
+         rewrite e motive (λ x → {tail x ≡ zeros : Stream Nat}) in refl))
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> zeros)
+    assert Check.check_sig(book) == :ok
+
+    nats = ~S"""
+    def nats-always-zero : evidence Always Nat IsZero (natsFrom 0) :=
+      unfold refl (λ (t : Stream Nat) → λ (e : {t ≡ natsFrom 0 : Stream Nat}) →
+        (rewrite e motive (λ x → IsZero (head x)) in refl,
+         rewrite e motive (λ x → {tail x ≡ natsFrom 0 : Stream Nat}) in refl))
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> nats)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "nats-always-zero"
+    assert msg =~ "cannot convert"
+  end
+
+  test "Always: a Unit invariant must prove the obligation at every stream" do
+    claim = ~S"""
+    def nats-always-zero : evidence Always Nat IsZero (natsFrom 0) :=
+      unfold tt (λ (t : Stream Nat) → λ (_ : Unit) → (refl, tt))
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> claim)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "nats-always-zero"
+    assert msg =~ "cannot convert"
+  end
+
+  test "Always: uncons of a proof gives the obligation at the tail, so natsFrom 0 is not all zeros" do
+    claim = ~S"""
+    def not-always-zero : evidence Π (p : Always Nat IsZero (natsFrom 0)) → Empty :=
+      λ (p : Always Nat IsZero (natsFrom 0)) → one-ne-zero (head (tail p))
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> claim)
+    assert Check.check_sig(book) == :ok
+  end
+
+  test "~: equal streams are bisimilar; natsFrom 0 and zeros are not" do
+    step = ~S"""
+    (λ (a : Stream Nat) → λ (b : Stream Nat) → λ (e : {a ≡ b : Stream Nat}) →
+      (rewrite e motive (λ x → {head x ≡ head b : Nat}) in refl,
+       rewrite e motive (λ x → {tail x ≡ tail b : Stream Nat}) in refl))
+    """
+
+    tail =
+      "def nats-tail : evidence tail (natsFrom 0) ~ natsFrom (suc 0) :=\n  unfold refl " <> step
+
+    assert {:ok, book} = Parser.parse(@streams_book <> tail)
+    assert Check.check_sig(book) == :ok
+
+    bad = "def nats-bisim-zeros : evidence natsFrom 0 ~ zeros :=\n  unfold refl " <> step
+    assert {:ok, book} = Parser.parse(@streams_book <> bad)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "nats-bisim-zeros"
+
+    unit = ~S"""
+    def nats-bisim-zeros : evidence natsFrom 0 ~ zeros :=
+      unfold tt (λ (a : Stream Nat) → λ (b : Stream Nat) → λ (_ : Unit) → (refl, tt))
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> unit)
+    assert {:error, msg} = Check.check_sig(book)
+    assert msg =~ "nats-bisim-zeros"
+    assert msg =~ "cannot convert"
+  end
+
+  test "~: uncons of a proof relates the tails" do
+    claim = ~S"""
+    def not-bisim : evidence Π (p : natsFrom 0 ~ zeros) → Empty :=
+      λ (p : natsFrom 0 ~ zeros) → one-ne-zero (head (tail p))
+    """
+
+    assert {:ok, book} = Parser.parse(@streams_book <> claim)
+    assert Check.check_sig(book) == :ok
   end
 
   test "list.muro checks; evidence is not emitted; length runs" do

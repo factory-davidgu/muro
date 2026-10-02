@@ -73,6 +73,10 @@ data Tm (n : ℕ) : Set where
   addt   : Tm n → Tm n → Tm n
   toi64  : Tm n → Tm n
   packi  : Tm n → Tm n → Tm n                  -- two I64s; shape toi64 (suc (suc 0))
+  -- Always A P s, and σ ~ τ at A: coinductive families over streams.
+  -- One uncons gives the head obligation and the family at the tail(s).
+  alw    : (A P s : Tm n) → Tm n
+  bsm    : (A σ τ : Tm n) → Tm n
 
 ------------------------------------------------------------------------
 -- PHOAS terms. Binders are V → PTm V, not Tm → Tm.
@@ -115,6 +119,8 @@ data PTm (V : Set) : Set where
   addt   : PTm V → PTm V → PTm V
   toi64  : PTm V → PTm V
   packi  : PTm V → PTm V → PTm V
+  alw    : PTm V → PTm V → PTm V → PTm V
+  bsm    : PTm V → PTm V → PTm V → PTm V
 
 ------------------------------------------------------------------------
 -- Global definition identifiers (closed book).
@@ -184,3 +190,5 @@ showTm (muli x y)   = "muli(" ++ showTm x ++ " " ++ showTm y ++ ")"
 showTm (addt t u)   = "addt(" ++ showTm t ++ " " ++ showTm u ++ ")"
 showTm (toi64 t)    = "toI64(" ++ showTm t ++ ")"
 showTm (packi x y)  = "packI(" ++ showTm x ++ " " ++ showTm y ++ ")"
+showTm (alw A P s)  = "Always(" ++ showTm P ++ " " ++ showTm s ++ ")"
+showTm (bsm A a b)  = "(" ++ showTm a ++ " ~ " ++ showTm b ++ ")"
