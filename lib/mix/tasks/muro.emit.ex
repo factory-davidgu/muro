@@ -45,7 +45,7 @@ defmodule Mix.Tasks.Muro.Emit do
 
   defp emit(path, "c") do
     case Muro.emit_c(path) do
-      {:ok, files} -> Enum.each(files, &Mix.shell().info/1)
+      {:ok, files} -> Enum.each(files, fn path -> Mix.shell().info(path) end)
       {:error, e} -> Mix.raise(e)
     end
   end
