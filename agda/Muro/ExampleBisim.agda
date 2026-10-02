@@ -1,6 +1,6 @@
 ------------------------------------------------------------------------
--- Stream bisimilarity: σ ~ τ = ν R. {head σ ≡ head τ} × R
--- Same ν-former as Stream and Always.
+-- σ ~ τ unfolds to {head σ ≡ head τ} × (tail σ ~ tail τ).
+-- The recursive component is a proof about the tails.
 --
 -- J.J.M.M. Rutten, Elements of Stream Calculus (An Extensive Exercise
 -- in Coinduction), ENTCS 45 (2001), Theorem 2.1.
@@ -8,7 +8,7 @@
 
 module Muro.ExampleBisim where
 
-open import Data.Fin.Base using (zero)
+open import Data.Fin.Base using (zero; suc)
 open import Data.List.Base using (List; []; _∷_)
 open import Data.Unit.Base using (⊤; tt)
 open import Relation.Binary.PropositionalEquality.Core using (_≡_; refl)
@@ -28,7 +28,7 @@ zerosBisimTy : Tm 0
 zerosBisimTy = bisim nat (def 0) (def 1)
 
 zerosBisimTm : Tm 0
-zerosBisimTm = unf one (lam affine unit (pair rfl one))
+zerosBisimTm = unf one (lam affine unit (pair rfl (def 2)))
 
 zerosBook : Sig
 zerosBook = fromDefs (
@@ -57,7 +57,10 @@ natsTailTy =
 
 natsTailTm : Tm 0
 natsTailTm =
-  lam affine nat (unf one (lam affine unit (pair rfl one)))
+  lam affine nat
+    (unf one
+      (lam affine unit
+        (pair rfl (app (def 1) (su (var (suc zero)))))))
 
 natsBook : Sig
 natsBook = fromDefs (

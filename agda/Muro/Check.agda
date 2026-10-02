@@ -52,15 +52,18 @@ record RecSt (n : ℕ) : Set where
     nextArg : Maybe ℕ        -- leading λs still to pass before that argument
     smaller : Vec Bool n
     recOk   : Vec Bool n
+    -- Set on the step of an indexed ν (Always, ~). In evidence, a
+    -- self-call there is the coinductive step and need not descend.
+    coind   : Bool
 
 extRec : ∀ {n} → RecSt n → Bool → Bool → RecSt (suc n)
-extRec (recst sl p _ sm rok) newSmall newOk =
-  recst sl p nothing (newSmall ∷ sm) (newOk ∷ rok)
+extRec (recst sl p _ sm rok g) newSmall newOk =
+  recst sl p nothing (newSmall ∷ sm) (newOk ∷ rok) g
 
 -- A leading λ of a definition body binds argument `pos` when nextArg
 -- is just 0; erased binders count as positions too.
 lamRec : ∀ {n} → RecSt n → RecSt (suc n)
-lamRec (recst sl p na sm rok) = recst sl p (stepArg na) (false ∷ sm) (isArg na ∷ rok)
+lamRec (recst sl p na sm rok g) = recst sl p (stepArg na) (false ∷ sm) (isArg na ∷ rok) g
   where
     isArg : Maybe ℕ → Bool
     isArg (just zero) = true
@@ -504,9 +507,9 @@ data _,_⊢[_]_⇒_ σ Γ where
     → strengthen₂ T ≡ ok C
     → σ , Γ ⊢[ m ] letp e t ⇒ C
 
-  ⇒-nu : ∀ {F}                                        -- body small
-    → σ , ext Γ affine typ ⊢[ spec ] F ⇒ typ
-    → σ , Γ ⊢[ spec ] nu F ⇒ typ
+  ⇒-nu : ∀ {F K}                                   -- body small
+    → σ , ext Γ affine K ⊢[ spec ] F ⇒ wk K
+    → σ , Γ ⊢[ spec ] nu F ⇒ K
 
   ⇒-unf : ∀ {m S A seed f}
     → σ , Γ ⊢[ m ] seed ⇐ S
@@ -583,6 +586,10 @@ data _,_⊢[_]_⇐_ σ Γ where
     → σ , ext (ext Γ affine A) affine (wk B) ⊢[ m ] t ⇐ wk (wk C)
     → σ , Γ ⊢[ m ] letp e t ⇐ C
 
+  -- Bare ν (Stream): the step is checked at F[Y := S].
+  -- An applied family (Always, ~): the step is checked at
+  -- (F[Y := ν F]) applied to the indices, so the recursive component
+  -- is the predicate at the tail, not the seed.
   ⇐-unf : ∀ {m S F seed f}
     → σ , Γ ⊢[ m ] seed ⇐ S
     → σ , Γ ⊢[ m ] f ⇐ pi affine S (wk (inst F S))
@@ -722,10 +729,14 @@ checkNu spec _ _ = ok tt
 checkNu _    T t = go T t
   where
     go : ∀ {n} → Tm n → Tm n → Result ⊤
-    go (pi _ _ B) (lam _ _ u) = go B u
-    go (nu _)     (unf _ _)   = ok tt
-    go (nu _)     _           = fail "ν value must be an unfold"
-    go _          _           = ok tt
+    go (pi _ _ B)             (lam _ _ u) = go B u
+    go (nu _)                 (unf _ _)   = ok tt
+    go (nu _)                 _           = fail "ν value must be an unfold"
+    go (app (nu _) _)         (unf _ _)   = ok tt
+    go (app (app (nu _) _) _) (unf _ _)   = ok tt
+    go (app (nu _) _)         _           = fail "ν value must be an unfold"
+    go (app (app (nu _) _) _) _           = fail "ν value must be an unfold"
+    go _                      _           = ok tt
 
 mutual
   occurs : ∀ {n} → Fin n → Tm n → Bool
@@ -761,12 +772,27 @@ mutual
   occursList _ []       = false
   occursList x (t ∷ ts) = occurs x t ∨ occursList x ts
 
--- X is strictly positive: product/sum ok; not in a Π-domain; not under app.
+-- X is strictly positive: product ok; not in a Π-domain; an application
+-- is positive when X is the head and does not occur in the arguments.
 spos : ∀ {n} → Fin n → Tm n → Bool
+-- An application of the recursive variable to arguments that do not
+-- contain it is positive (Y (tail s)). A λ is positive when its domain
+-- does not contain it.
+argsPos : ∀ {n} → Fin n → List (Tm n) → Bool
+argsPos _ []       = true
+argsPos x (a ∷ as) = not (occurs x a) ∧ argsPos x as
+
+sposSpine : ∀ {n} → Fin n → Tm n → Bool
+sposSpine x t with unspine t
+... | var y , args = if eqFin x y then argsPos x args else not (occurs x t)
+... | _            = not (occurs x t)
+
 spos x (var _)     = true
 spos x (prod A B)  = spos x A ∧ spos x B
 spos x (pi _ A B)  = not (occurs x A) ∧ spos (suc x) B
 spos x (nu F)      = not (occurs (suc x) F)
+spos x (lam _ A t) = not (occurs x A) ∧ spos (suc x) t
+spos x (app f a)   = sposSpine x (app f a)
 spos x t           = not (occurs x t)
 
 strictPos : ∀ {n} → Tm (suc n) → Bool
@@ -835,41 +861,53 @@ checkCtorRest i np ni t = skip np t
 noDescent : String
 noDescent = "recursive call does not descend on a smaller argument"
 
--- A maximal application spine headed by the definition being checked
--- (run and evid; spec is not checked): the argument at `pos` must be a
--- smaller variable. A shorter spine has no such argument. The Bool is
--- infer′'s: an inner application (the head of a larger spine) is not
--- the maximal spine and is not checked.
-checkRec : ∀ {n} → Mode → Bool → RecSt n → Tm n → Result ⊤
-checkRec spec _    _  _ = ok tt
-checkRec _    true _  _ = ok tt
-checkRec {n} m false rs t = go (apps t)
+checkRecGo : ∀ {n} → RecSt n → Tm n → Result ⊤
+checkRecGo rs t = go rs (apps t)
   where
-    descend : List (Tm n) → Result ⊤
-    descend args =
+    descend : ∀ {n} → RecSt n → List (Tm n) → Result ⊤
+    descend rs args =
       case lookupList args (RecSt.pos rs) of λ where
         (ok a)   → if isSmallerVar rs a then ok tt else fail noDescent
         (fail _) → fail noDescent
 
-    go : Tm n × List (Tm n) → Result ⊤
-    go (def i , args) =
+    go : ∀ {n} → RecSt n → Tm n × List (Tm n) → Result ⊤
+    go rs (def i , args) =
       case RecSt.self rs of λ where
         nothing  → ok tt
-        (just j) → if i ≡ᵇ j then descend args else ok tt
-    go _ = ok tt
+        (just j) → if i ≡ᵇ j then descend rs args else ok tt
+    go _ _ = ok tt
 
--- The definition being checked may not occur unapplied in run or evid:
--- passed along, it could be applied to anything. The Bool is infer′'s:
--- at the head of a spine it is applied.
-selfApplied : ∀ {n} → Mode → Bool → RecSt n → ℕ → Result ⊤
-selfApplied spec _    _  _ = ok tt
-selfApplied _    true _  _ = ok tt
-selfApplied _    false rs i =
+-- A maximal application spine headed by the definition being checked
+-- (run and evid; spec is not checked): the argument at `pos` must be a
+-- smaller variable. A shorter spine has no such argument. The Bool is
+-- infer′'s: an inner application (the head of a larger spine) is not
+-- the maximal spine and is not checked. An evidence self-call in the
+-- step of an indexed ν is the coinductive step (`RecSt.coind`).
+checkRec : ∀ {n} → Mode → Bool → RecSt n → Tm n → Result ⊤
+checkRec spec _    _  _ = ok tt
+checkRec _    true _  _ = ok tt
+checkRec evid false rs t =
+  if RecSt.coind rs then ok tt else checkRecGo rs t
+checkRec _    false rs t = checkRecGo rs t
+
+selfRefused : ∀ {n} → RecSt n → ℕ → Result ⊤
+selfRefused rs i =
   case RecSt.self rs of λ where
     nothing  → ok tt
     (just j) → if i ≡ᵇ j
       then fail "recursive definition must be applied to its arguments"
       else ok tt
+
+-- The definition being checked may not occur unapplied in run or evid:
+-- passed along, it could be applied to anything. The Bool is infer′'s:
+-- at the head of a spine it is applied. Evidence under `RecSt.coind`
+-- may name itself: that occurrence is the coinductive step.
+selfApplied : ∀ {n} → Mode → Bool → RecSt n → ℕ → Result ⊤
+selfApplied spec _    _  _ = ok tt
+selfApplied _    true _  _ = ok tt
+selfApplied evid false rs i =
+  if RecSt.coind rs then ok tt else selfRefused rs i
+selfApplied _    false rs i = selfRefused rs i
 
 -- Index clash. Expected indices live at n; the constructor target may
 -- mention ctor-argument variables (depth d). No unification: su is
@@ -925,6 +963,64 @@ clashes k σ np expected t =
 -- are never recursed on except by checkTy, which recurses on the type
 -- as a term. A constructor spine is walked from its head
 -- (inferCtorSpine), as an application is.
+
+-- Drop de Bruijn index `at` (0 = nearest). Fails if that variable occurs.
+skipAt : ∀ {n} → ℕ → Fin (suc n) → Result (Fin n)
+skipAt zero    zero    = fail "ν kind mentions its binder"
+skipAt zero    (suc j) = ok j
+skipAt {suc n} (suc _) zero    = ok zero
+skipAt {suc n} (suc k) (suc j) = suc <$> skipAt k j
+skipAt {zero}  (suc _) _       = fail "ν kind mentions its binder"
+
+setGuard : ∀ {n} → RecSt n → RecSt n
+setGuard (recst sl p na sm rok _) = recst sl p na sm rok true
+
+-- Kind of a ν body. A product (Stream) has kind Type. A λ-telescope
+-- has the Π of its domains; the binder Y does not occur in the kind.
+-- Deeper than Stream A → Stream A → Type is refused.
+nuKind₂ : ∀ {n} → Tm (suc (suc (suc n))) → Result (Tm (suc (suc n)))
+nuKind₂ (lam _ _ _) = fail "ν family is too deep"
+nuKind₂ _ = ok typ
+
+nuKind₁ : ∀ {n} → Tm (suc (suc n)) → Result (Tm (suc n))
+nuKind₁ (lam q A t) =
+  renM (skipAt 1) A >>= λ A′ →
+  nuKind₂ t >>= λ B →
+  ok (pi q A′ B)
+nuKind₁ _ = ok typ
+
+nuKind : ∀ {n} → Tm (suc n) → Result (Tm n)
+nuKind (lam q A t) =
+  renM (skipAt 0) A >>= λ A′ →
+  nuKind₁ t >>= λ B →
+  ok (pi q A′ B)
+nuKind _ = ok typ
+
+applyFam : ∀ {n} → Tm n → List (Tm n) → Tm n
+applyFam t []             = t
+applyFam (lam _ _ b) (i ∷ is) = applyFam (inst b i) is
+applyFam t (i ∷ is)     = applyFam (app t i) is
+
+unfFam : ∀ {n} → Tm n → Tm (suc n) → List (Tm n) → Result (Tm n × Bool)
+unfFam S F [] = ok (inst F S , false)
+unfFam S (lam q A b) idxs =
+  let F = lam q A b in
+  ok (applyFam (inst F (nu F)) idxs , true)
+unfFam _ _ _ = fail "expected a ν family"
+
+unfSpine : ∀ {n} → Tm n → Tm n × List (Tm n) → Result (Tm n × Bool)
+unfSpine S (nu F , idxs) = unfFam S F idxs
+unfSpine _ (_ , _)       = fail "expected ν"
+
+unfStepOf : ∀ {n} → Tm n → Tm n → Result (Tm n × Bool)
+unfStepOf S (nu F) = ok (inst F S , false)
+unfStepOf S t      = unfSpine S (unspine t)
+
+-- Codomain of an unfold step, in the outer context, and whether the
+-- expected type is an applied family (true) or a bare ν (false).
+unfStep : ∀ {n} → ℕ → Sig → Tm n → Tm n → Result (Tm n × Bool)
+unfStep k σ T S = whnf k σ T >>= unfStepOf S
+
 mutual
   infer : ∀ {n} → ℕ → Sig → RecSt n → Ctx n → Mode → Tm n → Result (Tm n × UseVec n)
   infer k σ rs Γ m t = infer′ k σ rs Γ t m false
@@ -1239,10 +1335,11 @@ mutual
   -- ⇒-nu
   infer′ k σ rs Γ (nu _) run _ = fail "no promotion: ν is an erased term"
   infer′ k σ rs Γ (nu _) evid _ = fail "no promotion: ν is an erased term"
-  infer′ k σ rs Γ (nu F) spec _ =                            -- body small
-    check k σ (extRec rs false false) (ext Γ affine typ) spec F typ >>
+  infer′ k σ rs Γ (nu F) spec _ =
+    nuKind F >>= λ K →
+    check k σ (extRec rs false false) (ext Γ affine K) spec F (wk K) >>
     guard "ν body is not strictly positive" (strictPos F) >>
-    ok (typ , u0s)
+    ok (K , u0s)
 
   -- ⇒-pair
   infer′ k σ rs Γ (pair a b) m _ =
@@ -1366,19 +1463,21 @@ mutual
 
   -- ⇐-unf (λ may be affine or + on Data)
   check′ k σ rs Γ m (unf seed (lam q A t)) T =
-    viewNu k σ T >>= λ F →
     infer k σ rs Γ m seed >>= λ (S , seedU) →
     conv k σ A S >>
-    check k σ (extRec rs false false) (ext Γ q S) m t (wk (inst F S)) >>= λ uses →
+    unfStep k σ T S >>= λ (goal , fam) →
+    check k σ (extRec (if fam then setGuard rs else rs) false false)
+          (ext Γ q S) m t (wk goal) >>= λ uses →
     let (u₀ , us) = headTailU uses
     in checkBound m q u₀ >>
        checkUnfold k σ m rs (lam q A t) >>
        combine m seedU us
 
   check′ k σ rs Γ m (unf seed f) T =
-    viewNu k σ T >>= λ F →
     infer k σ rs Γ m seed >>= λ (S , seedU) →
-    check k σ rs Γ m f (pi affine S (wk (inst F S))) >>= λ fu →
+    unfStep k σ T S >>= λ (goal , fam) →
+    check k σ (if fam then setGuard rs else rs) Γ m f
+          (pi affine S (wk goal)) >>= λ fu →
     checkUnfold k σ m rs f >>
     combine m seedU fu
 
@@ -1417,11 +1516,11 @@ mutual
 ------------------------------------------------------------------------
 
 emptyRec : RecSt 0
-emptyRec = recst nothing 0 nothing [] []
+emptyRec = recst nothing 0 nothing [] [] false
 
 -- Checking definition i, descending on argument position p.
 defRec : ℕ → ℕ → RecSt 0
-defRec i p = recst (just i) p (just p) [] []
+defRec i p = recst (just i) p (just p) [] [] false
 
 -- The non-erased argument positions of a definition's type, read
 -- syntactically: the candidates for the position a self-call descends on.

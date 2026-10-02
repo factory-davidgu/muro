@@ -50,7 +50,7 @@ A productive `run` Stream of zeros. `head-zeros` is `{head zeros ≡ 0 : Nat}` b
 
 ## always.muro
 
-`Always` as evidence: every head of `zeros` satisfies `{0 ≡ 0 : Nat}`.
+`Always` as evidence: every element of `zeros` is `0`. The proof is the head equation together with the same proof at the tail.
 
 ## bisim.muro
 
