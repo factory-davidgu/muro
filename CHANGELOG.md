@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.12.0
+
+`mix muro.emit` writes the `run` definitions of a file. The default backend is Elixir, the same text as `Muro.emit_file/3`. `--backend c` writes `<name>.h` and `<name>.c` next to the file. C is a closed book of `Nat`, `Unit`, and user data (`match` is a `switch`, erased arguments are dropped, `run internal` is `static`). A run that mentions `Stream` or `I64` / `F32` / `Tensor` is refused (`c:stream`, `c:machine`) and still emits on the Elixir backend. There is no new tag.
+
+### Elixir
+
+- `Muro.Emit.C`. `Muro.Emit.run_defs/1` is the shared run filter. `Muro.emit_c/2`.
+- `mix muro.emit FILE [--backend elixir|c]`.
+
+### Manual
+
+- `emit.md`, README.
+
+### Package
+
+- Version 0.12.0.
+
 ## 0.11.0
 
 `mix muro.check` puts a small book behind the file: `pred`, `plus`, `inj-suc`, `plus_suc`, `sym`, `cong`. They are ordinary definitions, checked by the same checker. A name the file defines replaces the prelude's, and so does any prelude definition that refers to a replaced name, so `plus_suc` is not a lemma about a different `plus`. A prelude `run` is emitted as `defp` only when a `run` term in the file calls it. `check_sig` on a book passed in directly is unchanged. The Agda kernel has no prelude.

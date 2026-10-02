@@ -10,8 +10,16 @@ defmodule Muro.Emit do
 
   alias Muro.Ast
 
+  @doc """
+  Run definitions in book order. Data, spec, and evidence are omitted.
+  `run internal` stays in the list; its `export` flag is false.
+  """
+  def run_defs(book) when is_list(book) do
+    Enum.filter(book, &(Map.get(&1, :kind, :def) != :data and &1.mode == :run))
+  end
+
   def emit_module(module, book) when is_atom(module) do
-    runs = Enum.filter(book, &(Map.get(&1, :kind, :def) != :data and &1.mode == :run))
+    runs = run_defs(book)
     funs = runs |> Enum.map(&emit_def(&1, book)) |> Enum.join("\n\n")
 
     except =

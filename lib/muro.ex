@@ -21,9 +21,33 @@ defmodule Muro do
   end
 
   def emit_file(path, module, opts \\ []) when is_atom(module) do
+    with {:ok, book} <- checked_book(path, opts) do
+      {:ok, Emit.emit_module(module, book)}
+    end
+  end
+
+  @doc """
+  Write `<name>.h` and `<name>.c` next to `path` for its run definitions.
+  Streams and machine tensors are refused (`c:stream`, `c:machine`).
+  """
+  def emit_c(path, opts \\ []) do
+    stem = Path.basename(path, ".muro")
+    dir = Path.dirname(path)
+
+    with {:ok, book} <- checked_book(path, opts),
+         {:ok, {header, source}} <- Emit.C.render(book, stem) do
+      h = Path.join(dir, stem <> ".h")
+      c = Path.join(dir, stem <> ".c")
+      File.write!(h, header)
+      File.write!(c, source)
+      {:ok, [h, c]}
+    end
+  end
+
+  defp checked_book(path, opts) do
     with {:ok, book} <- parse_path(path),
          :ok <- Check.check_sig(Prelude.for_check(book), opts) do
-      {:ok, Emit.emit_module(module, Prelude.for_emit(book))}
+      {:ok, Prelude.for_emit(book)}
     end
   end
 
