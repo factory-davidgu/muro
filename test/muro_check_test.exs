@@ -366,12 +366,49 @@ defmodule Muro.CheckTest do
     bad = %{
       name: "bad",
       mode: :evidence,
-      type: {:always, p, {:var, "zeros"}},
+      type: {:always, :nat, p, {:var, "zeros"}},
       body: {:var, "bad"}
     }
 
     assert {:error, msg} = Check.check_sig(book ++ [bad])
     assert msg =~ "unfold" or msg =~ "ν" or msg =~ "unguarded" or msg =~ "applied"
+  end
+
+  test "Always of IsZero at natsFrom 0 is not proved by tt" do
+    src = """
+    ν Stream (A : Type) : Type where
+      uncons : Stream A → A × Stream A
+
+    def natsFrom : run Π (n : Nat) → Stream Nat :=
+      λ (n : Nat) → unfold n (λ (+ k : Nat) → (k, suc k))
+
+    def bogus : evidence Always Nat (λ (n : Nat) → {n ≡ 0 : Nat}) (natsFrom 0) :=
+      unfold tt (λ (_ : Unit) → (refl, tt))
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    refute msg =~ "unguarded"
+  end
+
+  test "natsFrom 0 ~ zeros is not proved by tt" do
+    src = """
+    ν Stream (A : Type) : Type where
+      uncons : Stream A → A × Stream A
+
+    def zeros : run Stream Nat :=
+      unfold 0 (λ (_ : Nat) → (0, 0))
+
+    def natsFrom : run Π (n : Nat) → Stream Nat :=
+      λ (n : Nat) → unfold n (λ (+ k : Nat) → (k, suc k))
+
+    def bogus : evidence natsFrom 0 ~ zeros :=
+      unfold tt (λ (_ : Unit) → (refl, tt))
+    """
+
+    assert {:ok, book} = Parser.parse(src)
+    assert {:error, msg} = Check.check_sig(book)
+    refute msg =~ "unguarded"
   end
 
   test "bisim.muro checks; evidence is not emitted" do

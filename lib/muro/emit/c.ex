@@ -71,7 +71,7 @@ defmodule Muro.Emit.C do
   defp classify({:unf, _, _}), do: :stream
   defp classify({:ucons, _}), do: :stream
   defp classify({:nu, _, _}), do: :stream
-  defp classify({:always, _, _}), do: :stream
+  defp classify({:always, _, _, _}), do: :stream
   defp classify({:bisim, _, _}), do: :stream
   defp classify(:i64), do: :machine
   defp classify(:f32ty), do: :machine

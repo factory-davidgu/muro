@@ -1,5 +1,6 @@
 ------------------------------------------------------------------------
--- Always: ν Y. P (head s) × Y, same former as Stream.
+-- Always P s unfolds to P (head s) × Always P (tail s).
+-- The recursive component is a proof about the tail, not Unit.
 ------------------------------------------------------------------------
 
 module Muro.ExampleAlways where
@@ -24,11 +25,12 @@ zerosTm = unf ze (lam affine nat (pair ze ze))
 
 -- Always (λ _ → {0 ≡ 0}) zeros
 alwaysTy : Tm 0
-alwaysTy = always const0≡0 (def 0)
+alwaysTy = always nat const0≡0 (def 0)
 
--- unfold tt (λ (_ : Unit) → (refl, tt))
+-- unfold tt (λ (_ : Unit) → (refl, zeros-always-zero))
+-- The tail of zeros is zeros, so the self-call is the tail proof.
 alwaysTm : Tm 0
-alwaysTm = unf one (lam affine unit (pair rfl one))
+alwaysTm = unf one (lam affine unit (pair rfl (def 1)))
 
 alwaysBook : Sig
 alwaysBook = fromDefs (
@@ -43,5 +45,5 @@ always-checks = refl
 badAlways : Sig
 badAlways = fromDefs (
   mkDef "zeros" run (stream nat) zerosTm ∷
-  mkDef "bad" evid (always const0≡0 (def 0)) (def 1) ∷
+  mkDef "bad" evid (always nat const0≡0 (def 0)) (def 1) ∷
   [])

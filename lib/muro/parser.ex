@@ -543,10 +543,10 @@ defmodule Muro.Parser do
 
   defp parse_always(s) do
     with {:ok, rest} <- kw(s, "Always"),
-         {:ok, _a, rest} <- parse_atom(skip(rest)),
+         {:ok, a, rest} <- parse_atom(skip(rest)),
          {:ok, p, rest} <- parse_atom(skip(rest)),
          {:ok, st, rest} <- parse_atom(skip(rest)) do
-      {:ok, {:always, p, st}, rest}
+      {:ok, {:always, a, p, st}, rest}
     end
   end
 

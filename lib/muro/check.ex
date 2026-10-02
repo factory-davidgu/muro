@@ -69,10 +69,11 @@ defmodule Muro.Check do
   # maximal application spine whose argument at pos is a smaller variable.
   # check_def tries each non-erased position (Agda: RecSt, checkBody).
 
-  defp empty_rec, do: %{self: nil, pos: 0, next_arg: nil, smaller: [], rec_ok: [], names: []}
+  defp empty_rec,
+    do: %{self: nil, pos: 0, next_arg: nil, smaller: [], rec_ok: [], names: [], guard: false}
 
   defp def_rec(name, pos),
-    do: %{self: name, pos: pos, next_arg: pos, smaller: [], rec_ok: [], names: []}
+    do: %{self: name, pos: pos, next_arg: pos, smaller: [], rec_ok: [], names: [], guard: false}
 
   defp push_name(rs, x), do: %{rs | names: [x | Map.get(rs, :names, [])]}
 
@@ -216,6 +217,7 @@ defmodule Muro.Check do
   # maximal spine and is not checked (Agda: checkRec).
   defp check_rec(:spec, _head?, _rs, _t), do: :ok
   defp check_rec(_mode, true, _rs, _t), do: :ok
+  defp check_rec(:evidence, false, %{guard: true}, _t), do: :ok
 
   defp check_rec(mode, false, rs, t) when mode in [:run, :evidence] do
     case apps(t) do
@@ -236,10 +238,18 @@ defmodule Muro.Check do
   defp self_applied(:spec, _head?, _rs, _name), do: :ok
   defp self_applied(_mode, true, _rs, _name), do: :ok
 
-  defp self_applied(_mode, false, rs, name) do
-    if rs.self == name,
-      do: {:error, "recursive definition must be applied to its arguments"},
-      else: :ok
+  defp self_applied(mode, false, rs, name) do
+    cond do
+      rs.self != name ->
+        :ok
+
+      # The step of an indexed ν. The self-call is the coinductive step.
+      mode == :evidence and rs.guard ->
+        :ok
+
+      true ->
+        {:error, "recursive definition must be applied to its arguments"}
+    end
   end
 
   # The non-erased argument positions of a definition's type, read
@@ -635,7 +645,7 @@ defmodule Muro.Check do
     end
   end
 
-  # ⇒-bisim / ⇐-unf: σ ~ τ = ν R. {head σ ≡ head τ} × R
+  # ⇒-bisim: σ ~ τ unfolds to {head σ ≡ head τ} × (tail σ ~ tail τ).
   defp payload_ty(k, book, f) do
     case view_prod(k, book, Subst.inst(f, :unit), []) do
       {:ok, {a, _}} -> {:ok, a}
@@ -649,24 +659,100 @@ defmodule Muro.Check do
          {:ok, a} <- payload_ty(k, book, f),
          {:ok, {tt, _}} <- infer(k, book, rs, gamma, :spec, t),
          :ok <- conv(k, book, names_of(rs, gamma), ts, tt) do
-      id = {:idt, a, {:letp, {:ucons, s}, {:var, 1}}, {:letp, {:ucons, t}, {:var, 1}}}
-      {:ok, {:nu, {:prod, Subst.wk(id), {:var, 0}}}}
+      {:ok, Subst.bisim(a, s, t)}
     end
   end
 
-  defp as_nu(k, book, rs, gamma, t) do
-    case whnf(k, book, t) do
-      {:ok, {:nu, f}} ->
-        {:ok, f}
+  # Elaborate `~` inside a type so a self-call and the tail obligation
+  # are both applications of the same family.
+  defp elab_type(k, book, ty), do: elab_ty(k, book, empty_rec(), [], ty)
 
-      {:ok, {:bisim, s, u}} ->
-        with {:ok, {:nu, f}} <- expand_bisim(k, book, rs, gamma, s, u), do: {:ok, f}
+  defp elab_ty(k, book, rs, gamma, {:pi, q, a, x, b}) do
+    with {:ok, b1} <-
+           elab_ty(k, book, push_name(ext_rec(rs, false, false), x), ext(gamma, q, a), b) do
+      {:ok, {:pi, q, a, x, b1}}
+    end
+  end
 
-      {:ok, t1} ->
-        {:error, "expected ν, got #{Print.term(t1, names_of(rs, gamma))}"}
+  defp elab_ty(k, book, rs, gamma, {:bisim, s, t}),
+    do: expand_bisim(k, book, rs, gamma, s, t)
 
-      err ->
-        err
+  defp elab_ty(_k, _book, _rs, _gamma, t), do: {:ok, t}
+
+  defp step_rec(rs, true), do: %{rs | guard: true}
+  defp step_rec(rs, false), do: rs
+
+  defp apply_fam(t, []), do: t
+  defp apply_fam({:lam, _, _, _, b}, [i | is]), do: apply_fam(Subst.inst(b, i), is)
+  defp apply_fam(t, [i | is]), do: apply_fam({:app, t, i}, is)
+
+  # Codomain of an unfold step, and whether the goal is an applied family.
+  defp unf_step(k, book, rs, gamma, ty, seed_ty) do
+    names = names_of(rs, gamma)
+
+    with {:ok, t1} <- whnf(k, book, ty) do
+      unf_step_of(k, book, rs, gamma, names, t1, seed_ty)
+    end
+  end
+
+  defp unf_step_of(_k, _book, _rs, _gamma, _names, {:nu, f}, seed_ty) do
+    {:ok, {Subst.inst(f, seed_ty), false}}
+  end
+
+  defp unf_step_of(k, book, rs, gamma, _names, {:bisim, s, u}, seed_ty) do
+    with {:ok, expanded} <- expand_bisim(k, book, rs, gamma, s, u) do
+      unf_step(k, book, rs, gamma, expanded, seed_ty)
+    end
+  end
+
+  defp unf_step_of(_k, _book, _rs, _gamma, names, t, _seed_ty) do
+    case apps(t) do
+      {{:nu, {:lam, _, _, _, _} = f}, [_ | _] = idxs} ->
+        {:ok, {apply_fam(Subst.inst(f, {:nu, f}), idxs), true}}
+
+      _ ->
+        {:error, "expected ν, got #{Print.term(t, names)}"}
+    end
+  end
+
+  # Kind of a ν body. Stream (a product) is Type. A λ-telescope is the
+  # Π of its domains; Y does not occur in the kind.
+  defp nu_kind(f), do: telescope(f, 0)
+
+  defp telescope({:lam, q, a, x, t}, y) do
+    with {:ok, a1} <- drop_var(a, y),
+         {:ok, b} <- telescope_cod(t, y + 1) do
+      {:ok, {:pi, q, a1, x, b}}
+    end
+  end
+
+  defp telescope(_, _), do: {:ok, :typ}
+
+  defp telescope_cod({:lam, _, _, _, _}, y) when y >= 2,
+    do: {:error, "ν family is too deep"}
+
+  defp telescope_cod({:lam, q, a, x, t}, y) do
+    with {:ok, a1} <- drop_var(a, y),
+         {:ok, b} <- telescope_cod(t, y + 1) do
+      {:ok, {:pi, q, a1, x, b}}
+    end
+  end
+
+  defp telescope_cod(_, _), do: {:ok, :typ}
+
+  defp drop_var(t, at) do
+    try do
+      {:ok,
+       Subst.ren(
+         fn
+           i when i == at -> throw(:nu_kind_hit)
+           i when i > at -> i - 1
+           i -> i
+         end,
+         t
+       )}
+    catch
+      :nu_kind_hit -> {:error, "ν kind mentions its binder"}
     end
   end
 
@@ -777,7 +863,18 @@ defmodule Muro.Check do
   defp spos?(x, {:prod, a, b}), do: spos?(x, a) and spos?(x, b)
   defp spos?(x, {:pi, _, a, _, b}), do: not occurs?(x, a) and spos?(x + 1, b)
   defp spos?(x, {:nu, f}), do: not occurs?(x + 1, f)
+  defp spos?(x, {:lam, _, a, _, t}), do: not occurs?(x, a) and spos?(x + 1, t)
+  defp spos?(x, {:app, _, _} = t), do: spos_app?(x, t)
   defp spos?(x, t), do: not occurs?(x, t)
+
+  # Y (tail s) is positive: the recursive variable is the head, and it
+  # does not occur in the arguments.
+  defp spos_app?(x, t) do
+    case apps(t) do
+      {{:var, y}, args} when y == x -> Enum.all?(args, &(not occurs?(x, &1)))
+      _ -> not occurs?(x, t)
+    end
+  end
 
   defp strict_pos?(f), do: spos?(0, f)
 
@@ -808,7 +905,18 @@ defmodule Muro.Check do
   defp go_nu({:bisim, _, _}, {:unf, _, _}), do: :ok
   defp go_nu({:nu, _}, _), do: {:error, "ν value must be an unfold"}
   defp go_nu({:bisim, _, _}, _), do: {:error, "ν value must be an unfold"}
-  defp go_nu(_, _), do: :ok
+
+  defp go_nu(ty, body) do
+    case apps(ty) do
+      {{:nu, _}, [_ | _]} ->
+        if match?({:unf, _, _}, body),
+          do: :ok,
+          else: {:error, "ν value must be an unfold"}
+
+      _ ->
+        :ok
+    end
+  end
 
   # -- infer / check ---------------------------------------------------------
 
@@ -819,19 +927,25 @@ defmodule Muro.Check do
 
     case lookup_def(book, name) do
       {:ok, d} ->
-        cond do
-          not allowed_def?(d.mode, m) ->
-            {:error, "no promotion: #{d.mode} definition #{name} in #{m} mode"}
+        case elab_type(k, book, d.type) do
+          {:ok, ty} ->
+            cond do
+              not allowed_def?(d.mode, m) ->
+                {:error, "no promotion: #{d.mode} definition #{name} in #{m} mode"}
 
-          m == :run ->
-            case run_ty(k, book, d.type) do
-              {:ok, true} -> {:ok, {d.type, u0s(n)}}
-              {:ok, false} -> {:error, "no promotion: definition #{name} has a spec type"}
-              err -> err
+              m == :run ->
+                case run_ty(k, book, ty) do
+                  {:ok, true} -> {:ok, {ty, u0s(n)}}
+                  {:ok, false} -> {:error, "no promotion: definition #{name} has a spec type"}
+                  err -> err
+                end
+
+              true ->
+                {:ok, {ty, u0s(n)}}
             end
 
-          true ->
-            {:ok, {d.type, u0s(n)}}
+          err ->
+            err
         end
 
       {:error, _} ->
@@ -1098,24 +1212,25 @@ defmodule Muro.Check do
       {m, {:nu, _}} when m in [:run, :evidence] ->
         {:error, "no promotion: ν is an erased term"}
 
-      # body small
+      # body small. A λ-telescope is a family: Y and the body share its kind.
       {:spec, {:nu, f}} ->
-        with {:ok, _} <-
+        with {:ok, knd} <- nu_kind(f),
+             {:ok, _} <-
                check(
                  k,
                  book,
                  push_name(ext_rec(rs, false, false), "x"),
-                 ext(gamma, :affine, :typ),
+                 ext(gamma, :affine, knd),
                  :spec,
                  f,
-                 :typ
+                 Subst.wk(knd)
                ),
              :ok <-
                if(strict_pos?(f),
                  do: :ok,
                  else: {:error, "ν body is not strictly positive"}
                ),
-             do: {:ok, {:typ, u0s(n)}}
+             do: {:ok, {knd, u0s(n)}}
 
       {m, {:bisim, _, _}} when m in [:run, :evidence] ->
         {:error, "no promotion: ~ is an erased term"}
@@ -1379,37 +1494,39 @@ defmodule Muro.Check do
              :ok <- check_bound(mode, :affine, ua),
              do: combine(mode, eu, tus)
 
-      # ⇐-unf
+      # ⇐-unf. Bare ν substitutes the seed for Y (Stream). An applied
+      # family substitutes ν F for Y and applies the indices, so the
+      # recursive component is the predicate at the tail.
       {:unf, seed, {:lam, q, a_ann, x, t}} ->
-        with {:ok, fu_ty} <- as_nu(k, book, rs, gamma, a),
-             {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
+        with {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
              :ok <- conv(k, book, names_of(rs, gamma), a_ann, s_ty),
+             {:ok, {goal, fam}} <- unf_step(k, book, rs, gamma, a, s_ty),
              {:ok, [u0 | us]} <-
                check(
                  k,
                  book,
-                 push_name(ext_rec(rs, false, false), x),
+                 push_name(ext_rec(step_rec(rs, fam), false, false), x),
                  ext(gamma, q, s_ty),
                  mode,
                  t,
-                 Subst.wk(Subst.inst(fu_ty, s_ty))
+                 Subst.wk(goal)
                ),
              :ok <- check_bound(mode, q, u0),
              :ok <- check_unfold(k, book, mode, rs, {:lam, q, a_ann, x, t}),
              do: combine(mode, seed_u, us)
 
       {:unf, seed, f} ->
-        with {:ok, fu_ty} <- as_nu(k, book, rs, gamma, a),
-             {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
+        with {:ok, {s_ty, seed_u}} <- infer(k, book, rs, gamma, mode, seed),
+             {:ok, {goal, fam}} <- unf_step(k, book, rs, gamma, a, s_ty),
              {:ok, fu} <-
                check(
                  k,
                  book,
-                 rs,
+                 step_rec(rs, fam),
                  gamma,
                  mode,
                  f,
-                 {:pi, :affine, s_ty, "_", Subst.wk(Subst.inst(fu_ty, s_ty))}
+                 {:pi, :affine, s_ty, "_", Subst.wk(goal)}
                ),
              :ok <- check_unfold(k, book, mode, rs, f),
              do: combine(mode, seed_u, fu)
@@ -1456,9 +1573,10 @@ defmodule Muro.Check do
   def check_def(book, %{kind: :data} = d, fuel), do: check_data(book, d, fuel)
 
   def check_def(book, %{mode: mode, type: ty, body: body} = d, k) do
-    with :ok <- fail_at(d, "type", check_ty(k, book, empty_rec(), [], ty)),
-         {:ok, _} <- fail_at(d, "body", check_body(k, book, d)),
-         :ok <- fail_at(d, "productivity", check_nu(mode, ty, body)) do
+    with {:ok, ty1} <- fail_at(d, "type", elab_type(k, book, ty)),
+         :ok <- fail_at(d, "type", check_ty(k, book, empty_rec(), [], ty1)),
+         {:ok, _} <- fail_at(d, "body", check_body(k, book, %{d | type: ty1})),
+         :ok <- fail_at(d, "productivity", check_nu(mode, ty1, body)) do
       :ok
     end
   end

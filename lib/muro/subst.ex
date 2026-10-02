@@ -297,4 +297,40 @@ defmodule Muro.Subst do
       p
     )
   end
+
+  @doc """
+  `Stream A = ν X. A × X`.
+  """
+  def stream(a), do: {:nu, {:prod, wk(a), {:var, 0}}}
+
+  # fst t = let (a, _) = t in a. snd t = let (_, b) = t in b.
+  def head(t), do: {:letp, {:ucons, t}, {:var, 1}}
+  def tail(t), do: {:letp, {:ucons, t}, {:var, 0}}
+
+  @doc """
+  `Always P s` unfolds to `P (head s) × Always P (tail s)`.
+  The binder is a predicate at a stream.
+  """
+  def always(a, p, s) do
+    body =
+      {:prod, {:app, wk(wk(p)), head({:var, 0})}, {:app, {:var, 1}, tail({:var, 0})}}
+
+    fam = {:lam, :affine, wk(stream(a)), "s", body}
+    {:app, {:nu, fam}, s}
+  end
+
+  @doc """
+  `σ ~ τ` unfolds to `{head σ ≡ head τ} × (tail σ ~ tail τ)`.
+  """
+  def bisim(a, s, t) do
+    st = stream(a)
+
+    inner =
+      {:lam, :affine, wk(wk(st)), "t",
+       {:prod, {:idt, wk(wk(wk(a))), head({:var, 1}), head({:var, 0})},
+        {:app, {:app, {:var, 2}, tail({:var, 1})}, tail({:var, 0})}}}
+
+    fam = {:lam, :affine, wk(st), "s", inner}
+    {:app, {:app, {:nu, fam}, s}, t}
+  end
 end

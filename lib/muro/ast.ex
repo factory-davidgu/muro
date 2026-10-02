@@ -33,7 +33,7 @@ defmodule Muro.Ast do
           | {:pair, named, named}
           | {:letp, named, name, name, named}
           | {:stream, named}
-          | {:always, named, named}
+          | {:always, named, named, named}
           | {:bisim, named, named}
           | {:nu, name, named}
           | {:unf, named, named}
@@ -210,11 +210,11 @@ defmodule Muro.Ast do
     end
   end
 
-  def to_db({:always, p, s}, env) do
-    with {:ok, p1} <- to_db(p, env),
+  def to_db({:always, a, p, s}, env) do
+    with {:ok, a1} <- to_db(a, env),
+         {:ok, p1} <- to_db(p, env),
          {:ok, s1} <- to_db(s, env) do
-      payload = {:app, p1, {:letp, {:ucons, s1}, {:var, 1}}}
-      {:ok, {:nu, {:prod, Muro.Subst.wk(payload), {:var, 0}}}}
+      {:ok, Muro.Subst.always(a1, p1, s1)}
     end
   end
 

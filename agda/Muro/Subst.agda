@@ -140,14 +140,34 @@ fstTm t = letp t (var (suc zero))
 sndTm : ∀ {n} → Tm n → Tm n
 sndTm t = letp t (var zero)
 
--- Always P s = ν Y. P (head s) × Y
-always : ∀ {n} → Tm n → Tm n → Tm n
-always P s = nu (prod (wk (app P (fstTm (ucons s)))) (var zero))
+-- Always P = ν (Y : Stream A → Type). λ s. P (head s) × Y (tail s)
+-- Always P s unfolds to P (head s) × Always P (tail s).
+alwaysFam : ∀ {n} → Tm n → Tm n → Tm (suc n)
+alwaysFam A P =
+  lam affine (wk (stream A))
+    (prod
+      (app (wk (wk P)) (fstTm (ucons (var zero))))
+      (app (var (suc zero)) (sndTm (ucons (var zero)))))
 
--- σ ~ τ = ν R. {head σ ≡ head τ : A} × R
+always : ∀ {n} → Tm n → Tm n → Tm n → Tm n
+always A P s = app (nu (alwaysFam A P)) s
+
+-- σ ~ τ = ν (R : Stream A → Stream A → Type).
+--           λ σ τ. {head σ ≡ head τ : A} × R (tail σ) (tail τ)
+bisimFam : ∀ {n} → Tm n → Tm (suc n)
+bisimFam A =
+  lam affine (wk (stream A))
+    (lam affine (wk (wk (stream A)))
+      (prod
+        (idt (wk (wk (wk A)))
+             (fstTm (ucons (var (suc zero))))
+             (fstTm (ucons (var zero))))
+        (app
+          (app (var (suc (suc zero))) (sndTm (ucons (var (suc zero)))))
+          (sndTm (ucons (var zero))))))
+
 bisim : ∀ {n} → Tm n → Tm n → Tm n → Tm n
-bisim A σ τ =
-  nu (prod (wk (idt A (fstTm (ucons σ)) (fstTm (ucons τ)))) (var zero))
+bisim A σ τ = app (app (nu (bisimFam A)) σ) τ
 
 fromZero : ∀ {n} → Fin 0 → Fin n
 fromZero ()
