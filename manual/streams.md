@@ -64,26 +64,28 @@ Emit of a checked run Stream is `Stream.unfold/2`. The pair is `{head, next_seed
 
 ## Always
 
-`Always P s` is the coinductive family “`P` holds at every head.” Same former as Stream: `ν Y. P (head s) × Y`.
+`Always P s` unfolds to `P (head s) × Always P (tail s)`. The binder is a predicate at a stream, and the body instantiates it at the tail. An `unfold` returns a proof at the head and a proof of `Always P` at the tail. The tail proof is the recursive call.
 
 ```
 def zeros-always-zero : evidence Always Nat (λ (_ : Nat) → {0 ≡ 0 : Nat}) zeros :=
-  unfold tt (λ (_ : Unit) → (refl, tt))
+  unfold tt (λ (_ : Unit) → (refl, zeros-always-zero))
 ```
+
+The tail of `zeros` is `zeros`, so the same proof is the tail obligation. `tt` does not have that type. `Always` of `λ n → {n ≡ 0}` at `natsFrom 0` fails for the same reason: the head is `0`, and the tail asks for the predicate at `natsFrom 1`.
 
 (`examples/always.muro`.) Surface: `Always A P s`. This is evidence. It is omitted at emit.
 
 ## Bisimulation
 
-`σ ~ τ` (ASCII `bisim σ τ`) is a coinductive family on two streams: heads equal, tails related. After J.J.M.M. Rutten, *Elements of Stream Calculus*, ENTCS 45 (2001), Theorem 2.1.
+`σ ~ τ` (ASCII `bisim σ τ`) unfolds to `{head σ ≡ head τ} × (tail σ ~ tail τ)`. After J.J.M.M. Rutten, *Elements of Stream Calculus*, ENTCS 45 (2001), Theorem 2.1.
 
 ```
 def zeros-bisim : evidence zeros ~ zeros' :=
-  unfold tt (λ (_ : Unit) → (refl, tt))
+  unfold tt (λ (_ : Unit) → (refl, zeros-bisim))
 
 def nats-tail-bisim : evidence Π (n : Nat) → tail (natsFrom n) ~ natsFrom (suc n) :=
   λ (n : Nat) →
-    unfold tt (λ (_ : Unit) → (refl, tt))
+    unfold tt (λ (_ : Unit) → (refl, nats-tail-bisim (suc n)))
 ```
 
 (`examples/bisim.muro`.) Always, `~`, and their inhabitants are evidence (or live in evidence). They are not Elixir streams.

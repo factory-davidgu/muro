@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.13.0
+
+`Always P s` unfolds to `P (head s) × Always P (tail s)`, and `σ ~ τ` unfolds to `{head σ ≡ head τ} × (tail σ ~ tail τ)`. The binder is the predicate at a stream, and the recursive component of `unfold` is checked at that predicate on the tails. `tt` no longer proves `Always` of `IsZero` at `natsFrom 0`, nor `natsFrom 0 ~ zeros`. Stream is unchanged: a bare `ν` still substitutes the seed for the binder.
+
+### Checker
+
+- `Muro.Check` and `agda/Muro/Check.agda`. An evidence self-call in that unfold step is the coinductive step.
+- `examples/always.muro`, `examples/bisim.muro`.
+
+### Manual
+
+- `streams.md`, `examples.md`.
+
+### Package
+
+- Version 0.13.0.
+
 ## 0.12.0
 
 `mix muro.emit` writes the `run` definitions of a file. The default backend is Elixir, the same text as `Muro.emit_file/3`. `--backend c` writes `<name>.h` and `<name>.c` next to the file. C is a closed book of `Nat`, `Unit`, and user data (`match` is a `switch`, erased arguments are dropped, `run internal` is `static`). A run that mentions `Stream` or `I64` / `F32` / `Tensor` is refused (`c:stream`, `c:machine`) and still emits on the Elixir backend. There is no new tag.
