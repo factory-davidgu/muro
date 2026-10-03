@@ -1,12 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.14.0
+
+A proof of `σ ~ τ` keeps that type in a product, a function argument, a constructor field, and a spec alias. Conversion compares both stream indices. The unfold step still takes its head goal from the indexed family, and the tail obligation stays `tail σ ~ tail τ`. Forming `~` checks that family, including in a binder domain, so a relation on `Stream F32` is refused. A recursive call wrapped in `rewrite`, `match`, or an annotation counts as an unfold head.
 
 ### Checker
 
-- Fix the 0.13.0 regression for `~` proofs in products, theorem arguments, constructor arguments, and spec aliases. Keep `~` in all type positions and compare both stream indices by conversion. The indexed `ν` still supplies the unfold step; its tail obligation stays `tail σ ~ tail τ`. Head-only proofs remain invalid. This does not add `uncons` on indexed proofs (#23).
-- Check the full indexed family when forming `~`, including in binder domains. A relation on `Stream F32` must not bypass the ban on kernel identity for `F32`.
-- Complete the Elixir head-occurrence check for rewrites, annotations, matches, and identity types, as in Agda. These forms must not hide a recursive call in an unfold head.
+- `Muro.Check`. `~` stays `{:bisim}` in every type position. The head-occurrence walk covers `rewrite`, annotation, `match`, and identity, as in Agda.
+
+### Package
+
+- Version 0.14.0.
 
 ## 0.13.0
 
